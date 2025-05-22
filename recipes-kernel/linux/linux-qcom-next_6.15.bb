@@ -14,6 +14,7 @@ SRCREV = "d76c9c2e094bee4b40ed9c85b0d7fd8b025bff61"
 PV = "6.15+git"
 
 SRC_URI = "git://github.com/qualcomm-linux/kernel.git;protocol=https;branch=qcom-next;tag=${SRCTAG}"
+SRC_URI += "file://0001-drivers-gpu-drm-msm-registers-improve-reproducibilit.patch"
 
 # To build bleeding edge qcom-next kernel set preferred 
 # provider of virtual/kernel to 'linux-qcom-next-tip'
