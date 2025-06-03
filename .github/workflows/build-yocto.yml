@@ -6,6 +6,7 @@ on:
       artifacts_url:
         description: "URL to retrieve build artifacts"
         value: ${{ jobs.create-output.outputs.url }}
+  workflow_dispatch:
 
 env:
   CACHE_DIR: /srv/gh-runners/quic-yocto
@@ -13,7 +14,7 @@ env:
 
 jobs:
   kas-setup:
-    if: github.repository == 'qualcomm-linux/meta-qcom'
+    if: github.repository == 'vkraleti/meta-qcom'
     runs-on: [self-hosted, x86]
     steps:
       - name: Update kas mirrors
@@ -38,7 +39,7 @@ jobs:
 
   yocto-check-layer:
     needs: kas-setup
-    if: github.repository == 'qualcomm-linux/meta-qcom'
+    if: github.repository == 'vkraleti/meta-qcom'
     runs-on: [self-hosted, x86]
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +57,7 @@ jobs:
 
   yocto-patchreview:
     needs: kas-setup
-    if: github.repository == 'qualcomm-linux/meta-qcom'
+    if: github.repository == 'vkraleti/meta-qcom'
     runs-on: [self-hosted, x86]
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +75,7 @@ jobs:
 
   compile:
     needs: kas-setup
-    if: github.repository == 'qualcomm-linux/meta-qcom'
+    if: github.repository == 'vkraleti/meta-qcom'
     outputs:
       url: ${{ steps.upload_artifacts.outputs.url }}
     strategy:
@@ -89,8 +90,13 @@ jobs:
           - qrb2210-rb1-core-kit
           - qcom-armv8a
           - qcom-armv7a
+        kernel:
+          - linux-yocto
+          - linux-yocto-dev
+          - linux-qcom-next
+          - linux-qcom-staging
     runs-on: [self-hosted, x86]
-    name: ${{ matrix.machine }}/poky/systemd
+    name: ${{ matrix.machine }}/${{ matrix.kernel }}/poky/systemd
     steps:
       - uses: actions/checkout@v4
         with:
