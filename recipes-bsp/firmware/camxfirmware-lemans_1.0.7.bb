@@ -9,42 +9,23 @@ SRC_URI[sha256sum] = "62dd76046c1ae0e34f843285524be02e9fe96093ff68096cb998e9844f
 
 S = "${UNPACKDIR}"
 
-inherit allarch
+FW_QCOM_NAME = "sa8775p"
+require recipes-bsp/firmware/firmware-qcom.inc
 
 # Disable configure and compile steps since this recipe uses prebuilt binaries.
 do_configure[noexec] = "1"
 do_compile[noexec] = "1"
 
-# Possible values are "xz" and "zst".
-FIRMWARE_COMPRESSION ?= ""
-
 do_install() {
-    install -d ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p
-    install -d ${D}${nonarch_base_libdir}/firmware/qcom/qcs8300
+    install -d ${D}${FW_QCOM_PATH}
+    cp -r ${S}/usr/lib/firmware/qcom/sa8775p/CAMERA_ICP.mbn ${D}${FW_QCOM_PATH}
     install -d ${D}${datadir}/doc/${BPN}
-
-    cp -r ${S}/usr/lib/firmware/qcom/sa8775p/CAMERA_ICP.mbn ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p/
-
-    case "${FIRMWARE_COMPRESSION}" in
-        zst | zstd)
-            zstd --compress --rm ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p/CAMERA_ICP.mbn
-            ;;
-        xz)
-            xz --compress --check=crc32 ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p/CAMERA_ICP.mbn
-            ;;
-    esac
-
     install -m 0644 ${S}/usr/share/doc/${BPN}/LICENSE.QCOM-2.txt ${D}${datadir}/doc/${BPN}
 
-    ln -srf ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p/CAMERA_ICP.mbn* ${D}${nonarch_base_libdir}/firmware/qcom/qcs8300/
+    # Monaco and Leamans use same CAMX Firmware
+    install -d ${D}${FW_QCOM_BASE_PATH}/qcs8300
+    ln -srf ${D}${FW_QCOM_PATH}/CAMERA_ICP.mbn* ${D}${FW_QCOM_BASE_PATH}/qcs8300/
 }
 
 PACKAGES += "camxfirmware-monaco"
-FILES:camxfirmware-monaco = "${nonarch_base_libdir}/firmware/qcom/qcs8300"
-FILES:${PN} = "${nonarch_base_libdir}/firmware/qcom/sa8775p"
-
-# Firmware file are pre-compiled, pre-stripped, and not target architecture executables.
-# Skipping QA checks: 'already-stripped', 'arch' because:
-# - Firmware is not AArch64 ELF (arch check fails)
-# - file is Pre-stripped  (already-stripped)
-INSANE_SKIP:${PN} += "already-stripped arch"
+FILES:camxfirmware-monaco = "${FW_QCOM_BASE_PATH}/qcs8300"
