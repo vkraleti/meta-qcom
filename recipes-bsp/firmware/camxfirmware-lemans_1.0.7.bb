@@ -39,7 +39,7 @@ do_install() {
     ln -srf ${D}${nonarch_base_libdir}/firmware/qcom/sa8775p/CAMERA_ICP.mbn* ${D}${nonarch_base_libdir}/firmware/qcom/qcs8300/
 }
 
-PACKAGES += "camxfirmware-monaco"
+PACKAGES = "${PN} ${PN}-doc camxfirmware-monaco"
 FILES:camxfirmware-monaco = "${nonarch_base_libdir}/firmware/qcom/qcs8300"
 FILES:${PN} = "${nonarch_base_libdir}/firmware/qcom/sa8775p"
 
