@@ -36,6 +36,7 @@ do_install() {
     install -m 0644 ${S}/usr/share/doc/${BPN}/LICENSE.QCOM-2.txt ${D}${datadir}/doc/${BPN}
 }
 
+PACKAGES = "${PN} ${PN}-doc"
 FILES:${PN} = "${nonarch_base_libdir}/firmware/qcom/qcm6490"
 
 # Firmware file are pre-compiled, pre-stripped, and not target architecture executables.
