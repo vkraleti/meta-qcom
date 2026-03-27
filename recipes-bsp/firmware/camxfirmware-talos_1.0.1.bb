@@ -22,3 +22,6 @@ do_install() {
     install -d ${D}${datadir}/doc/${BPN}
     install -m 0644 ${S}/usr/share/doc/${BPN}/LICENSE.QCOM-2.txt ${D}${datadir}/doc/${BPN}
 }
+
+PACKAGES:remove = "${PN}-dbg"
+PACKAGES:remove = "${PN}-dev"
