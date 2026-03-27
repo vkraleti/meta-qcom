@@ -21,7 +21,6 @@ do_install() {
     cp -r ${S}/usr/lib/firmware/qcom/sa8775p/CAMERA_ICP.mbn ${D}${FW_QCOM_PATH}
     install -d ${D}${datadir}/doc/${BPN}
     install -m 0644 ${S}/usr/share/doc/${BPN}/LICENSE.QCOM-2.txt ${D}${datadir}/doc/${BPN}
-
     # Monaco and Leamans use same CAMX Firmware
     install -d ${D}${FW_QCOM_BASE_PATH}/qcs8300
     ln -srf ${D}${FW_QCOM_PATH}/CAMERA_ICP.mbn* ${D}${FW_QCOM_BASE_PATH}/qcs8300/
@@ -29,3 +28,6 @@ do_install() {
 
 PACKAGES += "camxfirmware-monaco"
 FILES:camxfirmware-monaco = "${FW_QCOM_BASE_PATH}/qcs8300"
+
+PACKAGES:remove = "${PN}-dbg"
+PACKAGES:remove = "${PN}-dev"
