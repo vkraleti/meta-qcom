@@ -2,6 +2,10 @@ inherit allarch
 
 FILES:${PN} += "${nonarch_base_libdir}/firmware/"
 
+# Firmware file are pre-compiled, pre-stripped, and not target architecture executables.
+# Skipping QA checks: 'already-stripped', 'arch' because:
+# - Firmware is not AArch64 ELF (arch check fails)
+# - file is Pre-stripped  (already-stripped)
 INSANE_SKIP:${PN} += "arch already-stripped"
 
 # Default settings
@@ -35,6 +39,17 @@ FILES:linux-firmware-qcom-${FW_QCOM_NAME}-wifi = "${FW_QCOM_PATH}/wcnss.mbn* ${F
 # Possible values are "xz" and "zst".
 FIRMWARE_COMPRESSION ?= ""
 
+compress_firmware(){
+    case "${FIRMWARE_COMPRESSION}" in
+        zst | zstd)
+            zstd --compress --rm "$1"
+            ;;
+        xz)
+            xz --compress --check=crc32 "$1"
+            ;;
+    esac
+}
+
 python() {
     pn = d.getVar("PN")
     insanes = d.getVar("INSANE_SKIP:%s" % pn)
@@ -52,14 +67,7 @@ do_install:append() {
     do
         if [ "${fw%%jsn}" = "${fw}" ]
         then
-            case "${FIRMWARE_COMPRESSION}" in
-                zst | zstd)
-                    zstd --compress --rm ${fw}
-                    ;;
-                xz)
-                    xz --compress --check=crc32 ${fw}
-                    ;;
-            esac
+            compress_firmware "${fw}"
         fi
     done
 }
