@@ -84,3 +84,8 @@ FIT_DTB_COMPATIBLE[qcom_qcs5430-iot-subtype2] = \
     "qcs6490-rb3gen2 qcs6490-rb3gen2-vision-mezzanine"
 FIT_DTB_COMPATIBLE[qcom_qcs6490-iot-subtype2] = \
     "qcs6490-rb3gen2 qcs6490-rb3gen2-vision-mezzanine"
+
+# ---------- shikra ----------
+FIT_DTB_COMPATIBLE[qcom_shikra_cqm-itp] = "shikra-cqm-evk"
+FIT_DTB_COMPATIBLE[qcom_shikra_cqs-itp] = "shikra-cqs-evk"
+FIT_DTB_COMPATIBLE[qcom_shikra_iqs-itp] = "shikra-iqs-evk"
