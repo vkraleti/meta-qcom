@@ -1,0 +1,41 @@
+From ae6d3450329288d28a3e1b1e4eeb7d346c6db554 Mon Sep 17 00:00:00 2001
+From: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Date: Fri, 5 Jun 2026 20:12:39 +0530
+Subject: [PATCH 2/2] qcom-metadata: remove hyphens from Shikra SoC names
+
+UEFI compatible string matching logic treats hyphens as
+delimiters for suffixes.
+
+Rename Shikra SoC entries to remove hyphens so that names
+are interpreted as a single identifier, ensuring correct
+handling in compatible string matching.
+
+Signed-off-by: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ qcom-metadata.dts | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/qcom-metadata.dts b/qcom-metadata.dts
+index 263b627..f06423a 100644
+--- a/qcom-metadata.dts
++++ b/qcom-metadata.dts
+@@ -60,15 +60,15 @@
+ 			msm-id = <0x00000216>;
+ 		};
+ 
+-		shikra-cqm {
++		shikracqm {
+ 			msm-id = <0x000002f4>;
+ 		};
+ 
+-		shikra-cqs {
++		shikracqs {
+ 			msm-id = <0x000002f6>;
+ 		};
+ 
+-		shikra-iqs {
++		shikraiqs {
+ 			msm-id = <0x000002f7>;
+ 		};
+ 	};

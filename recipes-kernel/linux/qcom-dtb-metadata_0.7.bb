@@ -8,7 +8,12 @@ DEPENDS += "dtc-native"
 
 SRC_URI = "git://github.com/qualcomm-linux/qcom-dtb-metadata.git;branch=main;protocol=https;tag=v${PV}"
 
-SRCREV = "bf60e31a7eebbf5f54b5af55d182f869716966c0"
+SRC_URI:append = " \
+                   file://0001-qcom-metadata-add-support-for-ITP-platform.patch \
+                   file://0002-qcom-metadata-remove-hyphens-from-Shikra-SoC-names.patch \
+		 "
+
+SRCREV = "e08e4e175779587c6ed91f3f4fd620ba722f5ae2"
 
 INHIBIT_DEFAULT_DEPS = "1"
 
