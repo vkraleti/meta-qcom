@@ -1,0 +1,29 @@
+From 1ebc6b0d31b397eee1e8361e9ea62abb96f45c77 Mon Sep 17 00:00:00 2001
+From: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+Date: Fri, 5 Jun 2026 20:36:53 +0530
+Subject: [PATCH 1/2] qcom-metadata: add support for ITP platform
+
+Add support for ITP platform's board-id in qcom-metadata.dts
+
+Signed-off-by: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
+
+Upstream-Status: Pending
+---
+ qcom-metadata.dts | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/qcom-metadata.dts b/qcom-metadata.dts
+index f577979..263b627 100644
+--- a/qcom-metadata.dts
++++ b/qcom-metadata.dts
+@@ -127,6 +127,10 @@
+ 			board-id = <0x00000020>;
+ 		};
+ 
++		itp {
++			board-id = <0x00000033>;
++		};
++
+ 		mtp {
+ 			board-id = <0x00000008>;
+ 		};
