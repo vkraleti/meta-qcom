@@ -7,7 +7,12 @@
 inherit kernel-arch
 
 require conf/image-fitimage.conf
-require conf/machine/include/fit-dtb-compatible.inc
+
+# Selects which FIT_DTB_COMPATIBLE include to load.  Defaults to the base
+# file; set to fit-dtb-compatible-linux-qcom.inc in linux-qcom* kernel
+# recipes to extend with linux-qcom-only overlay entries.
+LINUX_QCOM_FIT_DTB_COMPATIBLE ?= "conf/machine/include/fit-dtb-compatible.inc"
+require ${LINUX_QCOM_FIT_DTB_COMPATIBLE}
 
 DEPENDS += "\
     u-boot-tools-native \
@@ -53,30 +58,45 @@ python do_generate_qcom_fitimage() {
     # Collect DTB/DTBO names selected in KERNEL_DEVICETREE to validate declarative FIT_DTB_COMPATIBLE combinations
     dtb_keys_list  = {os.path.splitext(f)[0].replace(',', '_') for f in files_set}
 
-    # Parse composite compatible keys :
-    # FIT_DTB_COMPATIBLE[base+ovl1+ovl2] = "..."
+    # Parse FIT_DTB_COMPATIBLE[<encoded-compat>] = "<dtb-stem> [<overlay-stem>...]"
+    # Flag keys encode commas as underscores (BitBake syntax constraint); decode
+    # with replace('_', ',') to recover the actual compatible string.
+    base_compats = {}   # base_dtb_id -> space-separated compat string(s)
     overlay_groups  = {}
     overlay_compats = {}
+    seen_combos = set()  # track overlay combos already added to overlay_groups
 
     compat_flags = d.getVarFlags("FIT_DTB_COMPATIBLE") or {}
-    for key, compat_val in compat_flags.items():
-        if '+' not in key:
-            continue
+    for encoded_key, combo_val in compat_flags.items():
+        compat_str = encoded_key.replace('_', ',')
 
-        parts = [os.path.basename(p) for p in key.split('+')]
+        parts = [os.path.basename(p) for p in combo_val.split()]
         if not parts:
             continue
 
-        # Skip base+overlay combinations not present in KERNEL_DEVICETREE to avoid generating invalid FIT configs
-        # from declarative FIT_DTB_COMPATIBLE metadata
+        # Skip combinations not present in KERNEL_DEVICETREE to avoid generating
+        # invalid FIT configs from declarative FIT_DTB_COMPATIBLE metadata.
         if not all(dtb in dtb_keys_list for dtb in parts):
             continue
 
         base = parts[0] + ".dtb"
+        base_dtb_id = base.replace(',', '_')
         overlays = [ovl + ".dtbo" for ovl in parts[1:]]
 
-        overlay_groups.setdefault(base, []).append(overlays)
-        overlay_compats[key] = compat_val
+        if overlays:
+            # Encode commas as underscores so combo_key matches the lookup_key
+            # built in fitimage_emit_section_qcomconfig (dtb_only_fitimage.py),
+            # which applies the same replacement; keep overlay_groups keyed by
+            # the encoded base id for the same reason.
+            combo_key = " ".join(p.replace(',', '_') for p in parts)
+            if combo_key not in seen_combos:
+                overlay_groups.setdefault(base_dtb_id, []).append(overlays)
+                seen_combos.add(combo_key)
+            existing = overlay_compats.get(combo_key, "")
+            overlay_compats[combo_key] = (existing + " " + compat_str).strip()
+        else:
+            existing = base_compats.get(base_dtb_id, "")
+            base_compats[base_dtb_id] = (existing + " " + compat_str).strip()
 
     # Emit DTB/DTBO sections for every entry from KERNEL_DEVICETREE
     for fname in files_set:
@@ -87,10 +107,13 @@ python do_generate_qcom_fitimage() {
         dtb_id = fname.replace(',', '_')
         compatible = ""
         if fname.endswith(".dtb"):
-            dtb_key = os.path.splitext(dtb_id)[0]
-            compatible = d.getVarFlag("FIT_DTB_COMPATIBLE", dtb_key) or ""
+            compatible = base_compats.get(dtb_id, "")
             if not compatible and dtb_id not in overlay_groups:
-                bb.fatal(f"FIT_DTB_COMPATIBLE[{dtb_key}] is not set for '{fname}'.")
+                bb.note(
+                    f"No FIT_DTB_COMPATIBLE entry covers '{fname}' for this "
+                    f"kernel variant; it will appear in the FIT image but have "
+                    f"no config node."
+                )
 
         root_node.fitimage_emit_section_dtb(dtb_id, dtb_path, compatible_str=compatible, dtb_type="flat_dt")
 

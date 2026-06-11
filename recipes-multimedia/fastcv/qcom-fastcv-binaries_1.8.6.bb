@@ -4,12 +4,12 @@ LICENSE = "LICENSE.qcom-2"
 LIC_FILES_CHKSUM = "file://${UNPACKDIR}/usr/share/doc/${PN}/NOLOGINBINARYLICENSEQTI.pdf;md5=4ceffe94cb40cdce6d2f4fb93cc063d1 \
                     file://${UNPACKDIR}/usr/share/doc/${PN}/NOTICE;md5=4b722aa0574e24873e07b94e40b92e4d "
 
-PBT_BUILD_DATE = "260222"
+PBT_BUILD_DATE = "260422"
 ARTIFACTORY_URL = "https://qartifactory-edge.qualcomm.com/artifactory/qsc_releases/software/chip/component/computervision-fastcv.qclinux.0.1/${PBT_BUILD_DATE}/prebuilt_yocto"
 PBT_ARCH = "armv8a"
 
 SRC_URI = "${ARTIFACTORY_URL}/${BPN}_${PV}_${PBT_ARCH}.tar.gz"
-SRC_URI[sha256sum] = "61522651088c8fd210febe2911bd979784f08ad207013fe76e96851ac7c666b3"
+SRC_URI[sha256sum] = "bcaa974b97b4e9ec09edf1843dc821dd01bf0cfe6953c93de447064bf8898b56"
 S = "${UNPACKDIR}"
 
 DEPENDS += "glib-2.0 fastrpc"
@@ -24,6 +24,7 @@ do_install() {
     install -d ${D}${libdir}/pkgconfig
     install -d ${D}${datadir}/doc/${PN}
     install -d ${D}${includedir}/fastcv
+    install -d ${D}${datadir}/qcom/glymur/Qualcomm/Glymur-CRD/dsp/cdsp
     install -d ${D}${datadir}/qcom/kaanapali/Qualcomm/Kaanapali-MTP/dsp/cdsp
     install -d ${D}${datadir}/qcom/qcm6490/Thundercomm/RB3gen2/dsp/cdsp
     install -d ${D}${datadir}/qcom/qcs615/Qualcomm/QCS615-RIDE/dsp/cdsp
@@ -52,6 +53,7 @@ do_install() {
     install -m 0644 ${S}/usr/lib/dsp/cdsp/cv/v73/LEMANS/*.so ${D}${datadir}/qcom/sa8775p/Qualcomm/SA8775P-RIDE/dsp/cdsp
     install -m 0644 ${S}/usr/lib/dsp/cdsp/cv/v79/PAKALA/*.so ${D}${datadir}/qcom/sm8750/Qualcomm/SM8750-MTP/dsp/cdsp
     install -m 0644 ${S}/usr/lib/dsp/cdsp/cv/v81/KAANAPALI/*.so ${D}${datadir}/qcom/kaanapali/Qualcomm/Kaanapali-MTP/dsp/cdsp
+	install -m 0644 ${S}/usr/lib/dsp/cdsp/cv/v81/GLYMUR/*.so ${D}${datadir}/qcom/glymur/Qualcomm/Glymur-CRD/dsp/cdsp
 
     install -m 0755 ${S}/usr/bin/fastcv_simple_test64 ${D}${bindir}
 }
@@ -59,8 +61,10 @@ do_install() {
 PACKAGE_BEFORE_PN = "${PN}-dsp fastcv-apps"
 
 PACKAGES += "\
+    ${PN}-glymur-crd-dsp \
     ${PN}-hamoa-iot-evk-dsp \
     ${PN}-kaanapali-mtp-dsp \
+    ${PN}-purwa-iot-evk-dsp \
     ${PN}-qcs615-ride-dsp \
     ${PN}-qcs8300-ride-dsp \
     ${PN}-sa8775p-ride-dsp \
@@ -71,14 +75,17 @@ PACKAGES += "\
 FILES:${PN}-dsp = "${libdir}/libfastcvdsp_stub.so.*"
 FILES:fastcv-apps = "${bindir}/fastcv_simple_test64"
 
+RDEPENDS:${PN}-glymur-crd-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-hamoa-iot-evk-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-kaanapali-mtp-dsp = "${PN}-dsp"
+RDEPENDS:${PN}-purwa-iot-evk-dsp = "${PN}-dsp ${PN}-hamoa-iot-evk-dsp"
 RDEPENDS:${PN}-qcs615-ride-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-qcs8300-ride-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-sa8775p-ride-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-sm8750-mtp-dsp = "${PN}-dsp"
 RDEPENDS:${PN}-thundercomm-rb3gen2-dsp = "${PN}-dsp"
 
+INSANE_SKIP:${PN}-glymur-crd-dsp = "arch libdir"
 INSANE_SKIP:${PN}-hamoa-iot-evk-dsp = "arch libdir"
 INSANE_SKIP:${PN}-kaanapali-mtp-dsp = "arch libdir"
 INSANE_SKIP:${PN}-qcs615-ride-dsp = "arch libdir"
@@ -88,6 +95,9 @@ INSANE_SKIP:${PN}-sm8750-mtp-dsp = "arch libdir"
 INSANE_SKIP:${PN}-thundercomm-rb3gen2-dsp = "arch libdir"
 
 
+ALLOW_EMPTY:${PN}-purwa-iot-evk-dsp = "1"
+
+FILES:${PN}-glymur-crd-dsp += "${datadir}/qcom/glymur/Qualcomm/Glymur-CRD/dsp/cdsp"
 FILES:${PN}-hamoa-iot-evk-dsp += "${datadir}/qcom/x1e80100/Qualcomm/Hamoa-IoT-EVK/dsp/cdsp"
 FILES:${PN}-kaanapali-mtp-dsp += "${datadir}/qcom/kaanapali/Qualcomm/Kaanapali-MTP/dsp/cdsp"
 FILES:${PN}-qcs615-ride-dsp += "${datadir}/qcom/qcs615/Qualcomm/QCS615-RIDE/dsp"

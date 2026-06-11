@@ -110,15 +110,15 @@ do_configure[noexec] = "1"
 do_compile[depends] += "${@'${QCOM_BOOT_FIRMWARE}:do_deploy' if d.getVar('QCOM_BOOT_FIRMWARE') else ''}"
 
 do_compile() {
-    CBSP_SCRIPTS="${STAGING_DATADIR_NATIVE}/cbsp-boot-utilities"
+    CBSP_DATA="${STAGING_DATADIR_NATIVE}/cbsp-boot-utilities"
     EDK2_BASETOOLS="${STAGING_DATADIR_NATIVE}/edk2-basetools"
 
     # GenFfs/GenFv are staged to ${STAGING_BINDIR_NATIVE} (in PATH) by
-    # upstream meta-arm's edk2-basetools-native; FVCreation.py resolves
-    # them via shutil.which (see local patch).  GenerateCapsule.py and
-    # its Common/ Python package live under ${EDK2_BASETOOLS}; add that
-    # to PYTHONPATH so `import Common` works when we invoke the script
-    # directly.
+    # upstream meta-arm's edk2-basetools-native and resolved by
+    # qcom-capsule-tool via shutil.which. GenerateCapsule.py and its
+    # Common/ Python package live under ${EDK2_BASETOOLS}; add that to
+    # PYTHONPATH so `import Common` works when we invoke the script
+    # directly below.
     export PYTHONPATH="${EDK2_BASETOOLS}${PYTHONPATH:+:$PYTHONPATH}"
 
     # Use a board-specific FvUpdate.xml if provided via SRC_URI:append,
@@ -126,13 +126,13 @@ do_compile() {
     if [ -f "${WORKDIR}/FvUpdate.xml" ]; then
         FVUPDATE_XML="${WORKDIR}/FvUpdate.xml"
     else
-        FVUPDATE_XML="${CBSP_SCRIPTS}/FvUpdate.xml"
+        FVUPDATE_XML="${CBSP_DATA}/FvUpdate.xml"
     fi
 
     cd "${CAPSULE_DIR}"
 
     ROOT_INC="${CAPSULE_DIR}/QcFMPRoot.inc"
-    python3 "${CBSP_SCRIPTS}/BinToHex.py" "${CAPSULE_ROOT_CER}" "${ROOT_INC}"
+    qcom-capsule-tool bin-to-hex "${CAPSULE_ROOT_CER}" "${ROOT_INC}"
 
     # Stage boot binaries so they are writable (XBLConfig patching modifies
     # xbl_config.elf in place)
@@ -144,7 +144,7 @@ do_compile() {
     # DTB and its section index.  XBLCONFIG_DTB / XBLCONFIG_DTB_SECTION
     # override auto-detection when set explicitly.
     XBL_DUMP_LOG="${CAPSULE_DIR}/xbl_dump.log"
-    python3 "${CBSP_SCRIPTS}/xblconfig_parser.py" \
+    qcom-capsule-tool parse-config \
         "${BOOTBINS_STAGED}/xbl_config.elf" dump \
         --out-dir "${BOOTBINS_STAGED}" | tee "${XBL_DUMP_LOG}"
 
@@ -164,14 +164,14 @@ do_compile() {
         ORIG_DTB="${BOOTBINS_STAGED}/${DTB_PATCH}"
         UPDATED_DTB="${BOOTBINS_STAGED}/${DTB_PATCH%.dtb}-updated.dtb"
 
-        python3 "${CBSP_SCRIPTS}/set_dtb_property.py" \
+        qcom-capsule-tool set-dtb-property \
             "${ORIG_DTB}" \
             /sw/uefi/uefiplat \
             QcCapsuleRootCert \
             "@list:${ROOT_INC}" \
             "${UPDATED_DTB}"
 
-        python3 "${CBSP_SCRIPTS}/xblconfig_parser.py" \
+        qcom-capsule-tool parse-config \
             "${BOOTBINS_STAGED}/xbl_config.elf" replace \
             "${DTB_SECTION}" \
             "${UPDATED_DTB}" \
@@ -183,19 +183,19 @@ do_compile() {
         touch "${CAPSULE_DIR}/.xbl_with_oem_cert"
     fi
 
-    python3 "${CBSP_SCRIPTS}/SYSFW_VERSION_program.py" \
+    qcom-capsule-tool sysfw-version-create \
         -Gen \
         -FwVer "${CAPSULE_FW_VERSION}" \
         -LFwVer "${CAPSULE_FW_LSV}" \
         -O SYSFW_VERSION.bin
 
-    python3 "${CBSP_SCRIPTS}/FVCreation.py" firmware.fv \
+    qcom-capsule-tool fv-create firmware.fv \
         -FvType "${CAPSULE_FV_TYPE}" \
         "${FVUPDATE_XML}" \
         SYSFW_VERSION.bin \
         "${BOOTBINS_STAGED}"
 
-    python3 "${CBSP_SCRIPTS}/UpdateJsonParameters.py" \
+    qcom-capsule-tool update-json \
         -j config.json \
         -f  "${CAPSULE_FV_TYPE}" \
         -b  SYSFW_VERSION.bin \

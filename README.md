@@ -170,6 +170,11 @@ Make sure that ModemManager is not running, disable it if necessary.
    READ64 image: 13 offset: 0x0 length: 0x40
    ```
 
+## Security recommendations for production
+
+Please refer to the security recommendations for production builds documented here:
+[Security Recommendations](docs/security-recommendations.md)
+
 ## Contributing
 
 Please submit any patches against the `meta-qcom` layer (branch **master**)

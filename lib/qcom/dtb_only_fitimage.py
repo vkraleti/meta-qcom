@@ -118,7 +118,7 @@ class QcomItsNodeRoot(ItsNodeRootKernel):
                 dt_list = [dtb_id] + ovl_list
 
                 fdtentries = [f"fdt-{dt}" for dt in dt_list]
-                lookup_key = "+".join([os.path.splitext(dt)[0].replace(',', '_') for dt in dt_list])
+                lookup_key = " ".join([os.path.splitext(dt)[0].replace(',', '_') for dt in dt_list])
                 bb.note(lookup_key)
 
                 ovl_compats = str(((overlay_compats or {}).get(lookup_key, "")) or "").split()

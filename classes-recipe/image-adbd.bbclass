@@ -10,9 +10,7 @@
 
 IMAGE_FEATURES[validitems] += "enable-adbd"
 
-ADBD_PKGS = "${@bb.utils.contains("BBFILE_COLLECTIONS", "openembedded-layer", "android-tools-adbd android-tools-adbd-cmdline", "", d)}"
-
-PACKAGE_INSTALL:append = " ${@bb.utils.contains('IMAGE_FEATURES', [ 'enable-adbd' ], '${ADBD_PKGS}', '',d)} "
+PACKAGE_INSTALL:append = " ${@bb.utils.contains("BBFILE_COLLECTIONS", "openembedded-layer", "android-tools-adbd android-tools-adbd-cmdline", "", d)}"
 
 enable_adbd_at_boot () {
     touch ${IMAGE_ROOTFS}/etc/usb-debugging-enabled

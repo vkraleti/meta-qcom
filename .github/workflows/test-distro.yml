@@ -43,7 +43,7 @@ on:
 
 jobs:
   prepare-boot-jobs:
-    name: "Prepare boot jobs for ${{ inputs.distro }}"
+    name: "Prepare boot jobs for ${{ inputs.distro_name }}"
     runs-on: ubuntu-latest
     outputs:
       jobmatrix: ${{ steps.lava-test-plans.outputs.jobmatrix }}
@@ -152,7 +152,7 @@ jobs:
           echo "boot_result=$BOOT_RESULT" >> "$GITHUB_OUTPUT"
 
   prepare-premerge-jobs:
-    name: "Prepare pre-merge jobs for ${{ inputs.distro }}"
+    name: "Prepare pre-merge jobs for ${{ inputs.distro_name }}"
     runs-on: ubuntu-latest
     needs: boot-job-result
     # run only if boot jobs are successful

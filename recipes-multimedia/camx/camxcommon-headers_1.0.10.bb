@@ -5,9 +5,9 @@ DESCRIPTION = "This recipe provides headers for all Qualcomm CamX stacks"
 LICENSE = "LICENSE.qcom-2"
 LIC_FILES_CHKSUM = "file://usr/share/doc/${BPN}/LICENSE.QCOM-2.txt;md5=165287851294f2fb8ac8cbc5e24b02b0"
 
-PBT_BUILD_DATE = "260515"
+PBT_BUILD_DATE = "260527"
 SRC_URI = "https://qartifactory-edge.qualcomm.com/artifactory/qsc_releases/software/chip/component/camx.qclinux.0.0/${PBT_BUILD_DATE}/prebuilt_yocto/${BPN}_${PV}_armv8-2a.tar.gz"
-SRC_URI[sha256sum] = "4b7f8da6a991ca6c1ca127838fe9a713dd9bdfcae8d848d97b44caf8fa51dfec"
+SRC_URI[sha256sum] = "a5239a438f4a71f17bb6484b37ee3d766e0f847bbcebd2145c906f1ab5a9578c"
 
 S = "${UNPACKDIR}"
 

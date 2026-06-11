@@ -38,17 +38,18 @@ jobs:
           echo "::notice title=Target branch::Resolved target branch: $BRANCH"
           echo "value=$BRANCH" >> "$GITHUB_OUTPUT"
 
-  test:
+  test-wrynose:
     needs: determine-target-branch
-    if: github.event.workflow_run.conclusion == 'success' && needs.determine-target-branch.outputs.branch == 'master'
-    uses: ./.github/workflows/test.yml
+    if: github.event.workflow_run.conclusion == 'success' && needs.determine-target-branch.outputs.branch == 'wrynose'
+    uses: qualcomm-linux/meta-qcom/.github/workflows/test.yml@wrynose
     secrets: inherit
     with:
       build_id: ${{ github.event.workflow_run.id }}
 
   comment-on-pr:
     name: "Comment on PR"
-    needs: test
+    needs: [test-wrynose]
+    if: always() && (needs.test-wrynose.result == 'success')
     runs-on: ubuntu-latest
     steps:
 
@@ -56,7 +57,7 @@ jobs:
         id: download-result-summary
         uses: actions/download-artifact@v7
         with:
-          artifact-ids: ${{ needs.test.outputs.summary_ids }}
+          artifact-ids: ${{ needs.test-wrynose.outputs.summary_ids }}
           path: results_summary
 
       - name: Download event file
@@ -97,7 +98,8 @@ jobs:
   publish-test-results:
     uses: ./.github/workflows/publish-results.yml
     secrets: inherit
-    needs: [test]
+    needs: [test-wrynose]
+    if: always() && (needs.test-wrynose.result == 'success')
     with:
       commit: ${{ github.event.workflow_run.sha }}
       event_file: artifacts/Event File/event.json

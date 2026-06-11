@@ -8,7 +8,7 @@ LICENSE = "BSD-3-Clause-Clear"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=2998c54c288b081076c9af987bdf4838"
 
 SRC_URI = "git://github.com/qualcomm/userspace-resource-manager.git;protocol=https;branch=main;tag=v${PV}"
-SRCREV = "f006c0dc469c54ce5e7d723b4fb64d5b42b1a58d"
+SRCREV = "913825211ed6f45945c48470e8c9541983eaf81a"
 
 inherit cmake pkgconfig systemd
 
