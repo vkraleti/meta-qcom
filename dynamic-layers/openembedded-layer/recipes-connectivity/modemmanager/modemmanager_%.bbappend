@@ -16,4 +16,9 @@ SRC_URI:append:qcom = " \
     file://0009-sms-storage-do-hex-binary-conversion-in-sms-storage.patch \
     file://0010-sms-storage-Add-slot-info-for-TA-SMS-in-DB.patch \
     file://0001-qcom-soc-add-QRTR-MHI-based-modem-support.patch \
+    file://0001-port-qmi-add-BAM-DMUX-DPM-support-and-fix-QRTR-WDA.patch \
+    file://0002-base-modem-allow-QMI-modem-creation-without-net-port.patch \
+    file://0003-bearer-qmi-use-BindMuxDataPort-for-BAM-DMUX-WDS-client.patch \
+    file://0004-plugins-qcom-soc-send-DPM-open-port-during-enabling.patch \
+    file://0005-plugins-qcom-soc-replace-sio_port_per_port_number.patch \
 "
