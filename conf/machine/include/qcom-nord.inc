@@ -4,6 +4,8 @@ SOC_FAMILY = "nord"
 require conf/machine/include/qcom-base.inc
 require conf/machine/include/qcom-common.inc
 
+PREFERRED_PROVIDER_virtual/kernel = "linux-qcom-nord-next"
+
 DEFAULTTUNE = "armv9a"
 require conf/machine/include/arm/arch-armv9a.inc
 
