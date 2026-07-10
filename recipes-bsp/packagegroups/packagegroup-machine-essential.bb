@@ -6,6 +6,7 @@ PACKAGES = " \
     ${PN}-board-generic \
     ${PN}-qcom-generic \
     ${PN}-qcom-hamoa-soc \
+    ${PN}-qcom-nord-soc \
     ${PN}-qcom-purwa-soc \
     ${PN}-qcom-qcm2290-soc \
     ${PN}-qcom-qcs615-soc \
@@ -115,6 +116,21 @@ RRECOMMENDS:${PN}-qcom-hamoa-soc += " \
     kernel-module-snd-soc-x1e80100 \
     kernel-module-tscrcc-x1e80100 \
     kernel-module-videocc-sm8550 \
+"
+
+# TODO: replace with the real nord-specific kernel-module-* entries
+# (camcc/dispcc/gpucc/videocc-<nord-variant>, etc.) once available.
+RRECOMMENDS:${PN}-qcom-nord-soc += " \
+    ${PN}-board-generic \
+    ${PN}-qcom-generic \
+    kernel-module-ath12k \
+    kernel-module-camcc-nord \
+    kernel-module-dispcc-nord \
+    kernel-module-gpucc-nord \
+    kernel-module-pmic-glink \
+    kernel-module-pmic-glink-altmode \
+    kernel-module-pwrseq-qcom-wcn \
+    kernel-module-videocc-nord \
 "
 
 RRECOMMENDS:${PN}-qcom-purwa-soc += " \
