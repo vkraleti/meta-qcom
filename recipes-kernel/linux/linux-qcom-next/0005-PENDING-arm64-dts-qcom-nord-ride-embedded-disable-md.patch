@@ -1,0 +1,77 @@
+From 621c0a10c86d3cd8e91153d5ddda9958d9bc5400 Mon Sep 17 00:00:00 2001
+From: Mahadevan P <mahadevan.p@oss.qualcomm.com>
+Date: Mon, 5 Oct 2026 23:13:03 +0530
+Subject: [PATCH] PENDING: arm64: dts: qcom: nord-ride-embedded: disable mdss1
+
+Disable MDSS1 and its related nodes on the Nord Ride platform:
+MDSS1, its DP controllers (mdss1_dp0/mdss1_dp1), the DP2/DP3 PHYs
+and the eDP2/eDP3 connectors routed to them.
+
+Signed-off-by: Mahadevan P <mahadevan.p@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-ride-embedded.dts | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts b/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
+index d28527d767d3..6f38a3c23c20 100644
+--- a/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
++++ b/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
+@@ -230,6 +230,8 @@ dp2_connector: connector-dp2 {
+ 		label = "eDP2";
+ 		type = "full-size";
+ 
++		status = "disabled";
++
+ 		port {
+ 			dp2_connector_in: endpoint {
+ 				remote-endpoint = <&mdss1_dp0_out>;
+@@ -242,6 +244,8 @@ dp3_connector: connector-dp3 {
+ 		label = "eDP3";
+ 		type = "full-size";
+ 
++		status = "disabled";
++
+ 		port {
+ 			dp3_connector_in: endpoint {
+ 				remote-endpoint = <&mdss1_dp1_out>;
+@@ -579,14 +583,14 @@ &dp2_phy {
+ 	vdda-phy-supply = <&vreg_l2h_1p2>;
+ 	vdda-pll-supply = <&vreg_l1h_0p9>;
+ 
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &dp3_phy {
+ 	vdda-phy-supply = <&vreg_l2h_1p2>;
+ 	vdda-pll-supply = <&vreg_l1h_0p9>;
+ 
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &gpu_0 {
+@@ -789,11 +793,11 @@ &mdss0_dp1_out {
+ };
+ 
+ &mdss1 {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ &mdss1_dp0 {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ /* eDP2 */
+@@ -804,7 +808,7 @@ &mdss1_dp0_out {
+ };
+ 
+ &mdss1_dp1 {
+-	status = "okay";
++	status = "disabled";
+ };
+ 
+ /* eDP3 */

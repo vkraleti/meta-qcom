@@ -1,0 +1,84 @@
+From 5c244e646d3778de6b5fe61cb168088539e23b32 Mon Sep 17 00:00:00 2001
+From: Gourav Kumar <gourav.kumar@oss.qualcomm.com>
+Date: Thu, 15 Oct 2026 13:01:16 +0530
+Subject: [PATCH] PENDING: arm64: dts: qcom: nord: Fix iris AXI clock
+ assignment and IOVA reservation
+
+Fix the iris node so the firmware survives runtime suspend/resume.
+
+core_iface (controller, venus GDSC) was bound to
+NW_GCC_VIDEO_AXI0_CLK and vcodec0_iface (vcodec0 GDSC) to
+NW_GCC_VIDEO_AXI0C_CLK. On this SoC AXI0C is the controller's bus clock
+and AXI0 is the vcodec0 one.
+
+The iris driver enables whichever clock the DT binds to each per-block
+clock name. With the swapped mapping, power_off_hw() gates the whole
+vcodec0 block, including AXI0C, before the controller's NoC low-power
+handshake runs. The CPU_NOC_LPI_STATUS poll then times out (-ETIMEDOUT)
+and the remaining handshake steps are skipped silently. The controller
+is left wedged, so the next resume fails:
+
+  qcom-iris aa00000.video-codec: firmware boot timeout: CTRL_STATUS 0x0 ...
+  qcom-iris aa00000.video-codec: failed to resume
+
+Also, replace the non-standard "iommu-ranges" property on the non-pixel
+node, which nothing in the kernel parses, with a reserved-memory region
+carrying "iommu-addresses" for 0x0-0x25800000, matching how glymur
+describes it.
+
+With this, the LPI handshake completes on every suspend and no boot
+timeouts are seen across repeated suspend/resume.
+
+Signed-off-by: Gourav Kumar <gourav.kumar@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 4640b6d9959d..074034780e55 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -36,6 +36,12 @@ mc_virt: interconnect-mc-virt {
+ 	};
+ };
+ 
++&reserved_memory {
++	iris_resv: reservation-iris {
++		iommu-addresses = <&iris_non_pixel 0x0 0x25800000>;
++	};
++};
++
+ &bwmon_cluster0 {
+ 	compatible = "qcom,nord-cpu-bwmon",
+ 		     "qcom,sdm845-bwmon";
+@@ -2879,10 +2885,10 @@ iris: video-codec@aa00000 {
+ 		compatible = "qcom,nord-iris", "qcom,glymur-iris";
+ 		reg = <0x0 0x0aa00000 0x0 0xf0000>;
+ 
+-		clocks = <&nwgcc NW_GCC_VIDEO_AXI0_CLK>,
++		clocks = <&nwgcc NW_GCC_VIDEO_AXI0C_CLK>,
+ 			 <&videocc VIDEO_CC_MVS0C_CLK>,
+ 			 <&videocc VIDEO_CC_MVS0_CLK>,
+-			 <&nwgcc NW_GCC_VIDEO_AXI0C_CLK>,
++			 <&nwgcc NW_GCC_VIDEO_AXI0_CLK>,
+ 			 <&videocc VIDEO_CC_MVS0C_FREERUN_CLK>,
+ 			 <&videocc VIDEO_CC_MVS0_FREERUN_CLK>,
+ 			 <&nwgcc NW_GCC_VIDEO_AXI1_CLK>,
+@@ -2943,11 +2949,11 @@ &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 
+ 		status = "disabled";
+ 
+-		non-pixel {
++		iris_non_pixel: non-pixel {
+ 			iommus = <&apps_smmu_1 0x0940 0x20>,
+ 				 <&apps_smmu_1 0x0944 0x0>,
+ 				 <&apps_smmu_1 0x0960 0x20>;
+-			iommu-ranges = <0x25800000 0xda600000>;
++			memory-region = <&iris_resv>;
+ 		};
+ 
+ 		pixel {
+-- 
+2.43.0
+

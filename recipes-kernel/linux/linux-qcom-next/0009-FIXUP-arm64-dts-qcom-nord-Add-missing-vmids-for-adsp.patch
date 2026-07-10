@@ -1,0 +1,33 @@
+From 90eccb30e8c8376d39aa4b08061b039182ffae7b Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Mon, 5 Oct 2026 18:23:30 +0800
+Subject: [PATCH] FIXUP: arm64: dts: qcom: nord: Add missing vmids for adsp
+ fastrpc
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Submitted [https://github.com/qualcomm-linux/kernel-topics/commit/b8f7078ae8ea]
+---
+ arch/arm64/boot/dts/qcom/nord.dtsi | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord.dtsi b/arch/arm64/boot/dts/qcom/nord.dtsi
+index 469360d33b76..a992d0594c24 100644
+--- a/arch/arm64/boot/dts/qcom/nord.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord.dtsi
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <dt-bindings/dma/qcom-gpi.h>
++#include <dt-bindings/firmware/qcom,scm.h>
+ #include <dt-bindings/interrupt-controller/arm-gic.h>
+ #include <dt-bindings/mailbox/qcom-ipcc.h>
+ #include <dt-bindings/soc/qcom,gpr.h>
+@@ -2297,6 +2298,8 @@ fastrpc {
+ 					qcom,glink-channels = "fastrpcglink-apps-dsp";
+ 					label = "adsp";
+ 					memory-region = <&hpass_rpc_remote_heap_mem>;
++					qcom,vmids = <QCOM_SCM_VMID_LPASS
++						      QCOM_SCM_VMID_ADSP_HEAP>;
+ 					#address-cells = <1>;
+ 					#size-cells = <0>;
+ 

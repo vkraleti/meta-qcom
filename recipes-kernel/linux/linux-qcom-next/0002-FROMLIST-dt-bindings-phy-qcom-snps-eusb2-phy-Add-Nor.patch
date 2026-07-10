@@ -1,0 +1,64 @@
+From 758ce16b4f79d4d0555e056a34ecd3c3860c07bc Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 8 Oct 2026 09:50:16 +0800
+Subject: [PATCH] FROMLIST: dt-bindings: phy: qcom,snps-eusb2-phy: Add Nord bus
+ clock
+
+On Nord, the eUSB2 PHY registers are reached through the AHB2PHY_0
+bridge, which is gated by NE_GCC_AHB2PHY_CLK. Allow an optional
+second "bus" clock for the AHB2PHY bridge, require it for
+qcom,nord-snps-eusb2-phy, and keep other compatibles at the single
+"ref" clock.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261008015017.3359804-3-shengchao.guo@oss.qualcomm.com]
+---
+ .../bindings/phy/qcom,snps-eusb2-phy.yaml     | 22 +++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
+index 931cd0e7d297..67f2a587e65c 100644
+--- a/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
+@@ -34,12 +34,16 @@ properties:
+     const: 0
+ 
+   clocks:
++    minItems: 1
+     items:
+       - description: ref
++      - description: AHB2PHY bridge clock for register access
+ 
+   clock-names:
++    minItems: 1
+     items:
+       - const: ref
++      - const: bus
+ 
+   resets:
+     maxItems: 1
+@@ -77,6 +81,24 @@ allOf:
+       required:
+         - resets
+ 
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: qcom,nord-snps-eusb2-phy
++    then:
++      properties:
++        clocks:
++          minItems: 2
++        clock-names:
++          minItems: 2
++    else:
++      properties:
++        clocks:
++          maxItems: 1
++        clock-names:
++          maxItems: 1
++
+ additionalProperties: false
+ 
+ examples:

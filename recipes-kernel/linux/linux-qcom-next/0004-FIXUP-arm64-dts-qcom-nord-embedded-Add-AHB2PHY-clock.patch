@@ -1,0 +1,107 @@
+From 50f6ef10876f72e8474886ac279a5f50aaffe70e Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 8 Oct 2026 08:26:59 +0800
+Subject: [PATCH] FIXUP: arm64: dts: qcom: nord-embedded: Add AHB2PHY clock to
+ USB PHYs
+
+NE_GCC_AHB2PHY_CLK gates the AHB2PHY_0 bridge, which provides register
+access to all the USB PHYs: the two USB3-DP QMP PHYs and the three
+eUSB2 PHYs. None of the PHY nodes reference it, so clk_disable_unused()
+gates the clock before the PHYs probe. The PHY init sequence then never
+reaches the hardware, and the controllers fail to come up:
+
+  dwc3-qcom a600000.usb: DWC3 controller soft reset failed.
+  dwc3-qcom a600000.usb: error -ETIMEDOUT: failed to initialize core
+  xhci-hcd xhci-hcd.2.auto: can't setup: -110
+
+USB on Nord therefore only works when booting with clk_ignore_unused.
+
+Add the bridge clock as "cfg_ahb" to usb_0_qmpphy and usb_1_qmpphy, and
+as "bus" to usb_0_hsphy, usb_1_hsphy and usb_2_hsphy, so it is kept
+enabled while any of the PHYs is in use.
+
+This is a fixup for:
+
+"arm64: dts: qcom: nord-embedded: Add USB resources and PHYs"
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 30 ++++++++++++++-------
+ 1 file changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 87d3c5726bfa..4640b6d9959d 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -2610,8 +2610,10 @@ usb_2_hsphy: phy@88e0000 {
+ 			     "qcom,sm8550-snps-eusb2-phy";
+ 		reg = <0x0 0x088e0000 0x0 0x154>;
+ 
+-		clocks = <&tcsrcc TCSR_USB2_2_CLKREF_EN>;
+-		clock-names = "ref";
++		clocks = <&tcsrcc TCSR_USB2_2_CLKREF_EN>,
++			 <&negcc NE_GCC_AHB2PHY_CLK>;
++		clock-names = "ref",
++			      "bus";
+ 
+ 		/*
+ 		 * The SoC has three eUSB2 PHYs but only two QUSB2PHY block
+@@ -2635,11 +2637,13 @@ usb_0_qmpphy: phy@88e1000 {
+ 		clocks = <&negcc NE_GCC_USB3_PRIM_PHY_AUX_CLK>,
+ 			 <&tcsrcc TCSR_USB3_0_CLKREF_EN>,
+ 			 <&negcc NE_GCC_USB3_PRIM_PHY_COM_AUX_CLK>,
+-			 <&negcc NE_GCC_USB3_PRIM_PHY_PIPE_CLK>;
++			 <&negcc NE_GCC_USB3_PRIM_PHY_PIPE_CLK>,
++			 <&negcc NE_GCC_AHB2PHY_CLK>;
+ 		clock-names = "aux",
+ 			      "ref",
+ 			      "com_aux",
+-			      "usb3_pipe";
++			      "usb3_pipe",
++			      "cfg_ahb";
+ 
+ 		power-domains = <&negcc NE_GCC_USB3_PHY_GDSC>;
+ 
+@@ -2686,11 +2690,13 @@ usb_1_qmpphy: phy@88e4000 {
+ 		clocks = <&negcc NE_GCC_USB3_SEC_PHY_AUX_CLK>,
+ 			 <&tcsrcc TCSR_USB3_1_CLKREF_EN>,
+ 			 <&negcc NE_GCC_USB3_SEC_PHY_COM_AUX_CLK>,
+-			 <&negcc NE_GCC_USB3_SEC_PHY_PIPE_CLK>;
++			 <&negcc NE_GCC_USB3_SEC_PHY_PIPE_CLK>,
++			 <&negcc NE_GCC_AHB2PHY_CLK>;
+ 		clock-names = "aux",
+ 			      "ref",
+ 			      "com_aux",
+-			      "usb3_pipe";
++			      "usb3_pipe",
++			      "cfg_ahb";
+ 
+ 		power-domains = <&negcc NE_GCC_USB3_SEC_PHY_GDSC>;
+ 
+@@ -2736,8 +2742,10 @@ usb_0_hsphy: phy@88ea000 {
+ 			     "qcom,sm8550-snps-eusb2-phy";
+ 		reg = <0x0 0x088ea000 0x0 0x154>;
+ 
+-		clocks = <&tcsrcc TCSR_USB2_0_CLKREF_EN>;
+-		clock-names = "ref";
++		clocks = <&tcsrcc TCSR_USB2_0_CLKREF_EN>,
++			 <&negcc NE_GCC_AHB2PHY_CLK>;
++		clock-names = "ref",
++			      "bus";
+ 
+ 		resets = <&negcc NE_GCC_QUSB2PHY_PRIM_BCR>;
+ 
+@@ -2751,8 +2759,10 @@ usb_1_hsphy: phy@88eb000 {
+ 			     "qcom,sm8550-snps-eusb2-phy";
+ 		reg = <0x0 0x088eb000 0x0 0x154>;
+ 
+-		clocks = <&tcsrcc TCSR_USB2_1_CLKREF_EN>;
+-		clock-names = "ref";
++		clocks = <&tcsrcc TCSR_USB2_1_CLKREF_EN>,
++			 <&negcc NE_GCC_AHB2PHY_CLK>;
++		clock-names = "ref",
++			      "bus";
+ 
+ 		resets = <&negcc NE_GCC_QUSB2PHY_SEC_BCR>;
+ 

@@ -1,0 +1,56 @@
+From dbe585a71efc2f86f6ddaf84491cd2a963d7f03b Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 8 Oct 2026 09:50:17 +0800
+Subject: [PATCH] FROMLIST: phy: phy-snps-eusb2: Enable AHB2PHY bus clock on
+ Nord
+
+On Nord, the eUSB2 PHY registers sit behind the AHB2PHY_0 bridge, gated
+by NE_GCC_AHB2PHY_CLK. The Nord PHY currently matches the sm8550
+fallback, which only requests the "ref" clock, so the bridge clock is
+never enabled by the PHY. When nothing else holds it, e.g. on boards
+where only the USB20-only controller is in use, clk_disable_unused()
+gates the bridge and PHY init accesses go nowhere:
+
+  xhci-hcd xhci-hcd.2.auto: can't setup: -110
+
+Add Nord-specific match data that requests both "ref" and "bus" clocks,
+reusing the existing Qualcomm init sequence. The bus clock is enabled
+and disabled together with the ref clock in phy init/exit.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261008015017.3359804-4-shengchao.guo@oss.qualcomm.com]
+---
+ drivers/phy/phy-snps-eusb2.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/phy/phy-snps-eusb2.c b/drivers/phy/phy-snps-eusb2.c
+index af4fa17ac6cb..8429599f428b 100644
+--- a/drivers/phy/phy-snps-eusb2.c
++++ b/drivers/phy/phy-snps-eusb2.c
+@@ -452,6 +452,16 @@ static const struct snps_eusb2_phy_drvdata sm8550_snps_eusb2_phy = {
+ 	.num_clks       = ARRAY_SIZE(qcom_eusb2_hsphy_clock_names),
+ };
+ 
++static const char * const nord_eusb2_hsphy_clock_names[] = {
++	"ref", "bus",
++};
++
++static const struct snps_eusb2_phy_drvdata nord_snps_eusb2_phy = {
++	.phy_init	= qcom_snps_eusb2_hsphy_init,
++	.clk_names	= nord_eusb2_hsphy_clock_names,
++	.num_clks	= ARRAY_SIZE(nord_eusb2_hsphy_clock_names),
++};
++
+ static int snps_eusb2_hsphy_init(struct phy *p)
+ {
+ 	struct snps_eusb2_hsphy *phy = phy_get_drvdata(p);
+@@ -608,6 +618,9 @@ static int snps_eusb2_hsphy_probe(struct platform_device *pdev)
+ 
+ static const struct of_device_id snps_eusb2_hsphy_of_match_table[] = {
+ 	{
++		.compatible = "qcom,nord-snps-eusb2-phy",
++		.data = &nord_snps_eusb2_phy,
++	}, {
+ 		.compatible = "qcom,sm8550-snps-eusb2-phy",
+ 		.data = &sm8550_snps_eusb2_phy,
+ 	}, {

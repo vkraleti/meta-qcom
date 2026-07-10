@@ -1,0 +1,29 @@
+From 6c7f205e0579612c363d1d3a1ffdc0d8dbb77f76 Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 8 Oct 2026 09:50:15 +0800
+Subject: [PATCH] FROMLIST: dt-bindings: phy: qcom,sc8280xp-qmp-usb43dp-phy:
+ Add Nord cfg_ahb clock
+
+On Nord, the USB3-DP PHY registers are reached through the AHB2PHY_0
+bridge, which is gated by NE_GCC_AHB2PHY_CLK. Describe the bridge clock
+as a fifth "cfg_ahb" clock for Nord, using the same clock list as SC7180
+and SDM845.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261008015017.3359804-2-shengchao.guo@oss.qualcomm.com]
+---
+ .../devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml   | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+index b5ccc8b4d8c8..d56fca29265b 100644
+--- a/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml
+@@ -191,6 +191,7 @@ allOf:
+       properties:
+         compatible:
+           enum:
++            - qcom,nord-qmp-usb3-dp-phy
+             - qcom,sc7180-qmp-usb3-dp-phy
+             - qcom,sdm845-qmp-usb3-dp-phy
+     then:
