@@ -24,6 +24,13 @@ SRCREV ?= "d49c33864d06e9672dce57738be8851384578fcf"
 SRCBRANCH ?= "nobranch=1"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
+# For Nord, switch to temp enablement branch
+LINUX_VERSION:nord = "7.1+7.2-rc3+nord"
+SRCBRANCH:nord = "branch=staging/nord"
+
+# tag: nord-staging-qcom-next-7.2-rc3-20260807
+SRCREV:nord = "e01e6808687376f7ac3f1043a52a644c00097b43"
+
 SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
 
 # Additional kernel configs.
