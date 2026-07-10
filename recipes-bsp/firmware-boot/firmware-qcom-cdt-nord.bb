@@ -1,10 +1,10 @@
 DESCRIPTION = "CDT (Configuration Data Table) Firmware for Qualcomm Nord platform"
 
-# TODO: replace with the real CDT artifactory path, filename, and sha256sum for nord/iq10-rrd
+
 SRC_URI = " \
-    https://${CDT_ARTIFACTORY}/<PLACEHOLDER>/cdt/<PLACEHOLDER>.zip;downloadfilename=<PLACEHOLDER>_${PV}.zip;name=iq10-rrd-cdt \
+    file:///local/mnt/workspace/vkraleti/GitHub/nord_ridesx_cdt.bin;name=iq10-rrd-cdt \
     "
-SRC_URI[iq10-rrd-cdt.sha256sum] = "<PLACEHOLDER>"
+SRC_URI[iq10-rrd-cdt.sha256sum] = "1234"
 
 QCOM_CDT_SUBDIR = "iq10-rrd/ufs"
 

@@ -1,0 +1,64 @@
+From 905e712d340f4ff86666ac1b6109e8df25c06959 Mon Sep 17 00:00:00 2001
+From: Shiraz Hashim <shiraz.hashim@oss.qualcomm.com>
+Date: Fri, 10 Jul 2026 18:51:29 +0530
+Subject: [PATCH] Add Nord support
+
+Signed-off-by: Shiraz Hashim <shiraz.hashim@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ qcom-metadata.dts      |  8 ++++++++
+ qcom-next-fitimage.its | 12 ++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/qcom-metadata.dts b/qcom-metadata.dts
+index 17b5028..878663a 100644
+--- a/qcom-metadata.dts
++++ b/qcom-metadata.dts
+@@ -24,10 +24,18 @@
+ 			msm-id = <0x00000294>;
+ 		};
+ 
++		nord {
++			msm-id = <0x00000288>;
++		};
++
+ 		purwa {
+ 			msm-id = <0x000002c7>;
+ 		};
+ 
++		qam8x97p {
++			msm-id = <0x000002b2>;
++		};
++
+ 		qcm6490 {
+ 			msm-id = <0x000001f1>;
+ 		};
+diff --git a/qcom-next-fitimage.its b/qcom-next-fitimage.its
+index 4eab951..037ea22 100644
+--- a/qcom-next-fitimage.its
++++ b/qcom-next-fitimage.its
+@@ -230,6 +230,10 @@
+ 			data = /incbin/("./arch/arm64/boot/dts/qcom/glymur-crd-camx.dtbo");
+ 			type = "flat_dt";
+ 		};
++		fdt-nord-ride.dtb {
++			data = /incbin/("./arch/arm64/boot/dts/qcom/sa8797p-ride.dtb");
++     			type = "flat_dt";
++   		};
+ 	};
+ 
+ 	configurations {
+@@ -461,5 +465,13 @@
+ 			compatible = "qcom,glymur-crd-camx";
+ 			fdt = "fdt-glymur-crd.dtb", "fdt-glymur-crd-camx.dtbo";
+ 		};
++		conf-58 {
++			compatible = "qcom,qam8x97p-qam";
++			fdt = "fdt-nord-ride.dtb";
++		};
++		conf-59 {
++			compatible = "qcom,nord-qam";
++			fdt = "fdt-nord-ride.dtb";
++		};
+ 	};
+ };

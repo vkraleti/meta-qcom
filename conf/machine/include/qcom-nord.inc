@@ -6,8 +6,8 @@ require conf/machine/include/qcom-common.inc
 
 PREFERRED_PROVIDER_virtual/kernel = "linux-qcom-nord-next"
 
-DEFAULTTUNE = "armv9a"
-require conf/machine/include/arm/arch-armv9a.inc
+DEFAULTTUNE = "armv8-6a-crypto"
+require conf/machine/include/arm/arch-armv8-6a.inc
 
 MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS += " \
     packagegroup-qcom-boot-essential \
