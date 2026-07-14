@@ -8,6 +8,7 @@ PACKAGES = " \
 "
 
 RRECOMMENDS:${PN}-firmware = " \
+    linux-firmware-qcom-nord \
 "
 
 RDEPENDS:${PN}-hexagon-dsp-binaries = " \
