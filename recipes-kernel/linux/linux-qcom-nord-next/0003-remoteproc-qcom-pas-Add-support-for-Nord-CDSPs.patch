@@ -1,0 +1,120 @@
+From 1a2209a72da4749dfab90500a0b50a5e994c48c4 Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Mon, 18 May 2026 16:59:36 +0800
+Subject: [PATCH 3/6] remoteproc: qcom: pas: Add support for Nord CDSPs
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/remoteproc/qcom_q6v5_pas.c | 88 ++++++++++++++++++++++++++++++
+ 1 file changed, 88 insertions(+)
+
+diff --git a/drivers/remoteproc/qcom_q6v5_pas.c b/drivers/remoteproc/qcom_q6v5_pas.c
+index 486d08e75cab2..c866d48028f4e 100644
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -1443,6 +1443,90 @@ static const struct qcom_pas_data nord_adsp_resource = {
+ 	.smem_host_id = 2,
+ };
+ 
++static const struct qcom_pas_data nord_cdsp0_resource = {
++	.crash_reason_smem = 601,
++	.firmware_name = "cdsp.mdt",
++	.dtb_firmware_name = "cdsp_dtb.mbn",
++	.pas_id = 18,
++	.dtb_pas_id = 37,
++	.minidump_id = 7,
++	.auto_boot = true,
++	.proxy_pd_names = (char*[]){
++		"cx",
++		"mx",
++		"nsp",
++		NULL
++	},
++	.load_state = "cdsp",
++	.ssr_name = "cdsp0",
++	.sysmon_name = "cdsp0",
++	.ssctl_id = 0x17,
++	.smem_host_id = 5,
++};
++
++static const struct qcom_pas_data nord_cdsp1_resource = {
++	.crash_reason_smem = 633,
++	.firmware_name = "cdsp1.mdt",
++	.dtb_firmware_name = "cdsp1_dtb.mbn",
++	.pas_id = 30,
++	.dtb_pas_id = 59,
++	.minidump_id = 20,
++	.auto_boot = true,
++	.proxy_pd_names = (char*[]){
++		"cx",
++		"mx",
++		"nsp",
++		NULL
++	},
++	.load_state = "cdsp1",
++	.ssr_name = "cdsp1",
++	.sysmon_name = "cdsp1",
++	.ssctl_id = 0x20,
++	.smem_host_id = 69,
++};
++
++static const struct qcom_pas_data nord_cdsp2_resource = {
++	.crash_reason_smem = 665,
++	.firmware_name = "cdsp2.mdt",
++	.dtb_firmware_name = "cdsp2_dtb.mbn",
++	.pas_id = 57,
++	.dtb_pas_id = 60,
++	.minidump_id = 29,
++	.auto_boot = true,
++	.proxy_pd_names = (char*[]){
++		"cx",
++		"mx",
++		"nsp",
++		NULL
++	},
++	.load_state = "cdsp2",
++	.ssr_name = "cdsp2",
++	.sysmon_name = "cdsp2",
++	.ssctl_id = 0x1f,
++	.smem_host_id = 133,
++};
++
++static const struct qcom_pas_data nord_cdsp3_resource = {
++	.crash_reason_smem = 666,
++	.firmware_name = "cdsp3.mdt",
++	.dtb_firmware_name = "cdsp3_dtb.mbn",
++	.pas_id = 58,
++	.dtb_pas_id = 61,
++	.minidump_id = 30,
++	.auto_boot = true,
++	.proxy_pd_names = (char*[]){
++		"cx",
++		"mx",
++		"nsp",
++		NULL
++	},
++	.load_state = "cdsp3",
++	.ssr_name = "cdsp3",
++	.sysmon_name = "cdsp3",
++	.ssctl_id = 0x1a,
++	.smem_host_id = 197,
++};
++
+ static const struct qcom_pas_data sm8450_mpss_resource = {
+ 	.crash_reason_smem = 421,
+ 	.firmware_name = "modem.mdt",
+@@ -1686,6 +1770,10 @@ static const struct of_device_id qcom_pas_of_match[] = {
+ 	{ .compatible = "qcom,milos-mpss-pas", .data = &sm8450_mpss_resource },
+ 	{ .compatible = "qcom,milos-wpss-pas", .data = &sc7280_wpss_resource },
+ 	{ .compatible = "qcom,nord-adsp-pas", .data = &nord_adsp_resource },
++	{ .compatible = "qcom,nord-cdsp0-pas", .data = &nord_cdsp0_resource },
++	{ .compatible = "qcom,nord-cdsp1-pas", .data = &nord_cdsp1_resource },
++	{ .compatible = "qcom,nord-cdsp2-pas", .data = &nord_cdsp2_resource },
++	{ .compatible = "qcom,nord-cdsp3-pas", .data = &nord_cdsp3_resource },
+ 	{ .compatible = "qcom,msm8226-adsp-pil", .data = &msm8996_adsp_resource },
+ 	{ .compatible = "qcom,msm8953-adsp-pil", .data = &msm8996_adsp_resource },
+ 	{ .compatible = "qcom,msm8974-adsp-pil", .data = &msm8996_adsp_resource },
+-- 
+2.43.0
+

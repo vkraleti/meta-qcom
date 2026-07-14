@@ -1,0 +1,44 @@
+From 71be5ee99a900dcab8b9b105f24d6b2278124683 Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Wed, 27 May 2026 16:10:55 +0800
+Subject: [PATCH 6/6] [DEBUG] remoteproc: Serialize rproc boot/start
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/remoteproc/remoteproc_core.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/drivers/remoteproc/remoteproc_core.c b/drivers/remoteproc/remoteproc_core.c
+index f003be006b1bf..6b8e7b7137608 100644
+--- a/drivers/remoteproc/remoteproc_core.c
++++ b/drivers/remoteproc/remoteproc_core.c
+@@ -40,6 +40,7 @@
+ 
+ #define HIGH_BITS_MASK 0xFFFFFFFF00000000ULL
+ 
++static DEFINE_MUTEX(rproc_boot_mutex);
+ static DEFINE_MUTEX(rproc_list_mutex);
+ static LIST_HEAD(rproc_list);
+ static struct notifier_block rproc_panic_nb;
+@@ -1946,6 +1947,8 @@ int rproc_boot(struct rproc *rproc)
+ 		release_firmware(firmware_p);
+ 	}
+ 
++	mutex_unlock(&rproc_boot_mutex);
++
+ downref_rproc:
+ 	if (ret)
+ 		atomic_dec(&rproc->power);
+@@ -2297,6 +2300,8 @@ int rproc_add(struct rproc *rproc)
+ 		goto rproc_remove_cdev;
+ 	}
+ 
++	mutex_lock(&rproc_boot_mutex);
++
+ 	dev_info(dev, "%s is available\n", rproc->name);
+ 
+ 	/* create debugfs entries */
+-- 
+2.43.0
+

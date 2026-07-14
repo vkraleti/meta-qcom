@@ -1,0 +1,35 @@
+From 5bce51fa0f9a244bf9e074ffae8f6ba0ecb37d49 Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 14 May 2026 14:32:43 +0800
+Subject: [PATCH 2/6] arm64: dts: qcom: iq10-rrd: Enable ADSP remoteproc
+
+Enable ADSP (HPASS DSP) remoteproc on the IQ10 RRD board and specify
+the firmware image paths.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/iq10-rrd.dts | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/iq10-rrd.dts b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+index 39d254b49c147..a895f78f48558 100644
+--- a/arch/arm64/boot/dts/qcom/iq10-rrd.dts
++++ b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+@@ -557,6 +557,13 @@ &i2c19 {
+ 	status = "okay";
+ };
+ 
++&remoteproc_adsp {
++	firmware-name = "qcom/nord/adsp.mbn",
++			"qcom/nord/adsp_dtbs.elf";
++
++	status = "okay";
++};
++
+ &spi16 {
+ 	status = "okay";
+ };
+-- 
+2.43.0
+

@@ -1,0 +1,404 @@
+From 63720c6b6402eb937728abbb88b12921e00a4d54 Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Thu, 14 May 2026 14:24:10 +0800
+Subject: [PATCH 1/6] arm64: dts: qcom: nord: Add support for ADSP
+
+Add device tree nodes to support ADSP (HPASS DSP) remoteproc on Nord SoC.
+
+This includes:
+- SMEM memory reservation used by the inter-processor communication
+  infrastructure
+- IPCC mailbox controller for inter-processor signalling
+- AOSS QMP node for load state power management
+- SMP2P nodes providing stop control and fault/crash interrupt signals
+- Remoteproc nodes for ADSP (@4c00000) with a GLINK edge and FastRPC
+  compute contexts for userspace offload
+
+The embedded variant specific power domains (CX/MX), XO clock, and HPASS
+interconnect paths are filled in nord-embedded.dtsi.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi |  11 ++
+ arch/arm64/boot/dts/qcom/nord-ipcc.h        | 163 ++++++++++++++++++++
+ arch/arm64/boot/dts/qcom/nord.dtsi          | 142 +++++++++++++++++
+ 3 files changed, 316 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/qcom/nord-ipcc.h
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 619025011b569..72f6c0fccab8f 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -559,6 +559,17 @@ &config_noc SLAVE_QUP_2 QCOM_ICC_TAG_ALWAYS>,
+ 	pinctrl-names = "default";
+ };
+ 
++&remoteproc_adsp {
++	clocks = <&rpmhcc RPMH_CXO_CLK>;
++	clock-names = "xo";
++	interconnects = <&hpass_ag_noc MASTER_HPASS_PROC_0 QCOM_ICC_TAG_ALWAYS
++			 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++	power-domains = <&rpmhpd RPMHPD_CX>,
++			<&rpmhpd RPMHPD_MX>;
++	power-domain-names = "cx",
++			     "mx";
++};
++
+ &soc {
+ 	gcc: clock-controller@100000 {
+ 		compatible = "qcom,nord-gcc";
+diff --git a/arch/arm64/boot/dts/qcom/nord-ipcc.h b/arch/arm64/boot/dts/qcom/nord-ipcc.h
+new file mode 100644
+index 0000000000000..619e1c43e447c
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/nord-ipcc.h
+@@ -0,0 +1,163 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#ifndef __DTS_NORD_IPCC_H
++#define __DTS_NORD_IPCC_H
++
++/* Physical client IDs */
++#define IPCC_MPROC_AOP			0
++#define IPCC_MPROC_TZ			1
++#define IPCC_MPROC_ADSP0		2
++#define IPCC_MPROC_NSP0			3
++#define IPCC_MPROC_NSP1			4
++#define IPCC_MPROC_NSP2			5
++#define IPCC_MPROC_NSP3			6
++#define IPCC_MPROC_APSS_NS0		7
++#define IPCC_MPROC_APSS_NS1		8
++#define IPCC_MPROC_APSS_NS2		9
++#define IPCC_MPROC_APSS_NS3		10
++#define IPCC_MPROC_ADSP1		11
++#define IPCC_MPROC_ADSP2		12
++#define IPCC_MPROC_APSS_NS4		13
++#define IPCC_MPROC_DUMMY		14
++#define IPCC_MPROC_SOCCP		15
++#define IPCC_MPROC_CPUCP		16
++#define IPCC_MPROC_A78CSS		17
++#define IPCC_MPROC_TMESS		18
++#define IPCC_MPROC_SAIL0		19
++#define IPCC_MPROC_SAIL1		20
++#define IPCC_MPROC_SAIL2		21
++#define IPCC_MPROC_SAIL3		22
++#define IPCC_MPROC_SAIL4		23
++#define IPCC_MPROC_SAIL5		24
++
++#define IPCC_COMPUTE_L0_ADSP0		0
++#define IPCC_COMPUTE_L0_NSP0		1
++#define IPCC_COMPUTE_L0_NSP1		2
++#define IPCC_COMPUTE_L0_NSP2		3
++#define IPCC_COMPUTE_L0_NSP3		4
++#define IPCC_COMPUTE_L0_APSS_NS0	5
++#define IPCC_COMPUTE_L0_GPU0		6
++#define IPCC_COMPUTE_L0_APSS_NS1	7
++#define IPCC_COMPUTE_L0_APSS_NS2	8
++#define IPCC_COMPUTE_L0_APSS_NS3	9
++#define IPCC_COMPUTE_L0_CVP		10
++#define IPCC_COMPUTE_L0_ICP0		11
++#define IPCC_COMPUTE_L0_ICP1		12
++#define IPCC_COMPUTE_L0_VPU		13
++#define IPCC_COMPUTE_L0_DPU0		14
++#define IPCC_COMPUTE_L0_DPU1		15
++#define IPCC_COMPUTE_L0_ADSP1		16
++#define IPCC_COMPUTE_L0_ADSP2		17
++#define IPCC_COMPUTE_L0_APSS_NS4	18
++#define IPCC_COMPUTE_L0_DUMMY		19
++#define IPCC_COMPUTE_L0_SOCCP		20
++#define IPCC_COMPUTE_L0_SAIL0		21
++#define IPCC_COMPUTE_L0_SAIL1		22
++#define IPCC_COMPUTE_L0_SAIL2		23
++#define IPCC_COMPUTE_L0_SAIL3		24
++#define IPCC_COMPUTE_L0_SAIL4		25
++#define IPCC_COMPUTE_L0_SAIL5		26
++#define IPCC_COMPUTE_L0_IPA		27
++#define IPCC_COMPUTE_L0_GPU1		28
++
++#define IPCC_COMPUTE_L1_ADSP0		0
++#define IPCC_COMPUTE_L1_NSP0		1
++#define IPCC_COMPUTE_L1_NSP1		2
++#define IPCC_COMPUTE_L1_NSP2		3
++#define IPCC_COMPUTE_L1_NSP3		4
++#define IPCC_COMPUTE_L1_APSS_NS0	5
++#define IPCC_COMPUTE_L1_GPU0		6
++#define IPCC_COMPUTE_L1_APSS_NS1	7
++#define IPCC_COMPUTE_L1_APSS_NS2	8
++#define IPCC_COMPUTE_L1_APSS_NS3	9
++#define IPCC_COMPUTE_L1_CVP		10
++#define IPCC_COMPUTE_L1_ICP0		11
++#define IPCC_COMPUTE_L1_ICP1		12
++#define IPCC_COMPUTE_L1_VPU		13
++#define IPCC_COMPUTE_L1_DPU0		14
++#define IPCC_COMPUTE_L1_DPU1		15
++#define IPCC_COMPUTE_L1_ADSP1		16
++#define IPCC_COMPUTE_L1_ADSP2		17
++#define IPCC_COMPUTE_L1_APSS_NS4	18
++#define IPCC_COMPUTE_L1_DUMMY		19
++#define IPCC_COMPUTE_L1_SOCCP		20
++#define IPCC_COMPUTE_L1_SAIL0		21
++#define IPCC_COMPUTE_L1_SAIL1		22
++#define IPCC_COMPUTE_L1_SAIL2		23
++#define IPCC_COMPUTE_L1_SAIL3		24
++#define IPCC_COMPUTE_L1_SAIL4		25
++#define IPCC_COMPUTE_L1_SAIL5		26
++#define IPCC_COMPUTE_L1_IPA		27
++#define IPCC_COMPUTE_L1_GPU1		28
++
++#define IPCC_PERIPH_ADSP0		0
++#define IPCC_PERIPH_NSP0		1
++#define IPCC_PERIPH_NSP1		2
++#define IPCC_PERIPH_NSP2		3
++#define IPCC_PERIPH_NSP3		4
++#define IPCC_PERIPH_APSS_NS0		5
++#define IPCC_PERIPH_PCIE0		6
++#define IPCC_PERIPH_PCIE1		7
++#define IPCC_PERIPH_APSS_NS1		8
++#define IPCC_PERIPH_APSS_NS2		9
++#define IPCC_PERIPH_APSS_NS3		10
++#define IPCC_PERIPH_ADSP1		11
++#define IPCC_PERIPH_ADSP2		12
++#define IPCC_PERIPH_APSS_NS4		13
++#define IPCC_PERIPH_DUMMY		14
++
++#define IPCC_FENCE_ADSP0		0
++#define IPCC_FENCE_NSP0			1
++#define IPCC_FENCE_NSP1			2
++#define IPCC_FENCE_NSP2			3
++#define IPCC_FENCE_NSP3			4
++#define IPCC_FENCE_APSS_NS0		5
++#define IPCC_FENCE_GPU0			6
++#define IPCC_FENCE_APSS_NS1		7
++#define IPCC_FENCE_APSS_NS2		8
++#define IPCC_FENCE_APSS_NS3		9
++#define IPCC_FENCE_CVP			10
++#define IPCC_FENCE_ICP0			11
++#define IPCC_FENCE_ICP1			12
++#define IPCC_FENCE_CAM_ENG0		13
++#define IPCC_FENCE_CAM_ENG1		14
++#define IPCC_FENCE_CAM_ENG2		15
++#define IPCC_FENCE_CAM_ENG3		16
++#define IPCC_FENCE_CAM_ENG4		17
++#define IPCC_FENCE_CAM_ENG5		18
++#define IPCC_FENCE_CAM_ENG6		19
++#define IPCC_FENCE_CAM_ENG7		20
++#define IPCC_FENCE_CAM_ENG8		21
++#define IPCC_FENCE_CAM_ENG9		22
++#define IPCC_FENCE_CAM_ENG10		23
++#define IPCC_FENCE_CAM_ENG11		24
++#define IPCC_FENCE_CAM_ENG12		25
++#define IPCC_FENCE_VPU			26
++#define IPCC_FENCE_DPU0			27
++#define IPCC_FENCE_DPU1			28
++#define IPCC_FENCE_ADSP1		29
++#define IPCC_FENCE_ADSP2		30
++#define IPCC_FENCE_APSS_NS4		31
++#define IPCC_FENCE_DUMMY		32
++#define IPCC_FENCE_SOCCP		33
++#define IPCC_FENCE_IPA			34
++#define IPCC_FENCE_GPU1			35
++
++/* Signal IDs for COMPUTE_L0 protocol */
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MSG		0
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_MEM_INIT		1
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_VERSION		2
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_TEST		3
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_SSR		4
++#define IPCC_COMPUTE_L0_SIGNAL_IPCLITE_DEBUG		5
++
++#define IPCC_COMPUTE_L0_SIGNAL_MAX			32 /* Used by driver only */
++#define IPCC_COMPUTE_L1_SIGNAL_MAX			32 /* Used by driver only */
++
++#define IPCC_MPROC_SIGNAL_SCMI_A2P		5
++#define IPCC_MPROC_SIGNAL_SCMI_P2A		6
++
++#endif
+diff --git a/arch/arm64/boot/dts/qcom/nord.dtsi b/arch/arm64/boot/dts/qcom/nord.dtsi
+index 716297bcc9a63..e203c8b8abb43 100644
+--- a/arch/arm64/boot/dts/qcom/nord.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord.dtsi
+@@ -3,7 +3,12 @@
+  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ 
++#include <dt-bindings/firmware/qcom,scm.h>
+ #include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/mailbox/qcom-ipcc.h>
++#include <dt-bindings/soc/qcom,gpr.h>
++
++#include "nord-ipcc.h"
+ 
+ / {
+ 	interrupt-parent = <&intc>;
+@@ -685,6 +690,13 @@ qdss_apps_mem: qdss-apps-region@87b00000 {
+ 			no-map;
+ 		};
+ 
++		smem_mem: smem-region@89b00000 {
++			compatible = "qcom,smem";
++			reg = <0x0 0x89b00000 0x0 0x400000>;
++			no-map;
++			hwlocks = <&tcsr_mutex 3>;
++		};
++
+ 		global_sync_mem: global-sync-region@89f00000 {
+ 			reg = <0x0 0x89f00000 0x0 0x400000>;
+ 			no-map;
+@@ -902,6 +914,29 @@ dump_mem: mem-dump-region {
+ 		};
+ 	};
+ 
++	smp2p-adsp {
++		compatible = "qcom,smp2p";
++		interrupts-extended = <&ipcc IPCC_MPROC_ADSP0
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_MPROC_ADSP0
++				IPCC_MPROC_SIGNAL_SMP2P>;
++		qcom,smem = <443>, <429>;
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <2>;
++
++		smp2p_adsp_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_adsp_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
+ 	soc: soc@0 {
+ 		compatible = "simple-bus";
+ 		#address-cells = <2>;
+@@ -1509,6 +1544,103 @@ tcsr: syscon@1f60000 {
+ 			reg = <0x0 0x01f60000 0x0 0xa0000>;
+ 		};
+ 
++		remoteproc_adsp: remoteproc@4c00000 {
++			compatible = "qcom,nord-adsp-pas";
++			reg = <0x0 0x04c00000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 159 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_adsp_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog",
++					  "fatal",
++					  "ready",
++					  "handover",
++					  "stop-ack",
++					  "shutdown-ack";
++
++			memory-region = <&hpass_dsp0_mem>,
++					<&hpass_dsp0_dtb_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_adsp_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_MPROC_ADSP0
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_MPROC_ADSP0
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				qcom,remote-pid = <2>;
++				label = "adsp";
++
++				fastrpc {
++					compatible = "qcom,nord-fastrpc",
++						     "qcom,kaanapali-fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "adsp";
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu_0 0x09e3 0x0000>,
++							 <&apps_smmu_0 0x0a43 0x0020>,
++							 <&apps_smmu_0 0x0a63 0x0020>,
++							 <&apps_smmu_0 0x0a83 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu_0 0x09e4 0x0000>,
++							 <&apps_smmu_0 0x0a44 0x0020>,
++							 <&apps_smmu_0 0x0a64 0x0020>,
++							 <&apps_smmu_0 0x0a84 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu_0 0x09e5 0x0000>,
++							 <&apps_smmu_0 0x0a45 0x0020>,
++							 <&apps_smmu_0 0x0a65 0x0020>,
++							 <&apps_smmu_0 0x0a85 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@6 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <6>;
++						iommus = <&apps_smmu_0 0x09e6 0x0000>,
++							 <&apps_smmu_0 0x0a46 0x0020>,
++							 <&apps_smmu_0 0x0a66 0x0020>,
++							 <&apps_smmu_0 0x0a86 0x0000>;
++						dma-coherent;
++					};
++				};
++			};
++		};
++
++		ipcc: mailbox@9007000 {
++			compatible = "qcom,nord-ipcc",
++				     "qcom,ipcc";
++			reg = <0x0 0x09007000 0x0 0x1000>;
++			interrupts = <GIC_SPI 247 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-controller;
++			#interrupt-cells = <3>;
++			#mbox-cells = <2>;
++		};
++
+ 		pdc: interrupt-controller@b220000 {
+ 			compatible = "qcom,nord-pdc",
+ 				     "qcom,pdc";
+@@ -1628,6 +1760,16 @@ tsens7: thermal-sensor@c233000 {
+ 			#thermal-sensor-cells = <1>;
+ 		};
+ 
++		aoss_qmp: power-management@c300000 {
++			compatible = "qcom,nord-aoss-qmp", "qcom,aoss-qmp";
++			reg = <0x0 0x0c300000 0x0 0x400>;
++			interrupts-extended = <&ipcc IPCC_MPROC_AOP
++						     IPCC_MPROC_SIGNAL_GLINK_QMP
++						     IRQ_TYPE_EDGE_RISING>;
++			mboxes = <&ipcc IPCC_MPROC_AOP IPCC_MPROC_SIGNAL_GLINK_QMP>;
++			#clock-cells = <0>;
++		};
++
+ 		tlmm: pinctrl@f100000 {
+ 			compatible = "qcom,nord-tlmm";
+ 			reg = <0x0 0x0f100000 0x0 0xc0000>;
+-- 
+2.43.0
+

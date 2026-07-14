@@ -25,6 +25,12 @@ SRC_URI = "git://github.com/qualcomm-linux/kernel-topics.git;branch=early/hwe/no
 # Additional kernel configs.
 SRC_URI += " \
     file://configs/bsp-additions.cfg \
+    file://0001-arm64-dts-qcom-nord-Add-support-for-ADSP.patch \
+    file://0002-arm64-dts-qcom-iq10-rrd-Enable-ADSP-remoteproc.patch \
+    file://0003-remoteproc-qcom-pas-Add-support-for-Nord-CDSPs.patch \
+    file://0004-dt-bindings-misc-qcom-fastrpc-Add-label-for-cdsp2-an.patch \
+    file://0005-arm64-dts-qcom-nord-Add-support-for-CDSPs.patch \
+    file://0006-DEBUG-remoteproc-Serialize-rproc-boot-start.patch \
 "
 
 S = "${UNPACKDIR}/${BP}"

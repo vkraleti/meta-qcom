@@ -1,0 +1,884 @@
+From d715d55feb65f8999143b535f6c2e8d7c2f1648a Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Mon, 18 May 2026 17:10:27 +0800
+Subject: [PATCH 5/6] arm64: dts: qcom: nord: Add support for CDSPs
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/iq10-rrd.dts       |  28 +
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi |  52 ++
+ arch/arm64/boot/dts/qcom/nord.dtsi          | 748 ++++++++++++++++++++
+ 3 files changed, 828 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/iq10-rrd.dts b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+index a895f78f48558..72967179934ab 100644
+--- a/arch/arm64/boot/dts/qcom/iq10-rrd.dts
++++ b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+@@ -564,6 +564,34 @@ &remoteproc_adsp {
+ 	status = "okay";
+ };
+ 
++&remoteproc_cdsp0 {
++	firmware-name = "qcom/nord/cdsp.mbn",
++			"qcom/nord/cdsp_dtbs.elf";
++
++	status = "okay";
++};
++
++&remoteproc_cdsp1 {
++	firmware-name = "qcom/nord/cdsp1.mbn",
++			"qcom/nord/cdsp1_dtbs.elf";
++
++	status = "okay";
++};
++
++&remoteproc_cdsp2 {
++	firmware-name = "qcom/nord/cdsp2.mbn",
++			"qcom/nord/cdsp2_dtbs.elf";
++
++	status = "okay";
++};
++
++&remoteproc_cdsp3 {
++	firmware-name = "qcom/nord/cdsp3.mbn",
++			"qcom/nord/cdsp3_dtbs.elf";
++
++	status = "okay";
++};
++
+ &spi16 {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 72f6c0fccab8f..082211f958f10 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -570,6 +570,58 @@ &remoteproc_adsp {
+ 			     "mx";
+ };
+ 
++&remoteproc_cdsp0 {
++	clocks = <&rpmhcc RPMH_CXO_CLK>;
++	clock-names = "xo";
++	interconnects = <&nsp_data_noc_0 MASTER_NSP0_PROC QCOM_ICC_TAG_ALWAYS
++			 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++	power-domains = <&rpmhpd RPMHPD_CX>,
++			<&rpmhpd RPMHPD_MX>,
++			<&rpmhpd RPMHPD_NSP0>;
++	power-domain-names = "cx",
++			     "mx",
++			     "nsp";
++};
++
++&remoteproc_cdsp1 {
++	clocks = <&rpmhcc RPMH_CXO_CLK>;
++	clock-names = "xo";
++	interconnects = <&nsp_data_noc_1 MASTER_NSP1_PROC QCOM_ICC_TAG_ALWAYS
++			 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++	power-domains = <&rpmhpd RPMHPD_CX>,
++			<&rpmhpd RPMHPD_MX>,
++			<&rpmhpd RPMHPD_NSP1>;
++	power-domain-names = "cx",
++			     "mx",
++			     "nsp";
++};
++
++&remoteproc_cdsp2 {
++	clocks = <&rpmhcc RPMH_CXO_CLK>;
++	clock-names = "xo";
++	interconnects = <&nsp_data_noc_2 MASTER_NSP2_PROC QCOM_ICC_TAG_ALWAYS
++			 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++	power-domains = <&rpmhpd RPMHPD_CX>,
++			<&rpmhpd RPMHPD_MX>,
++			<&rpmhpd RPMHPD_NSP2>;
++	power-domain-names = "cx",
++			     "mx",
++			     "nsp";
++};
++
++&remoteproc_cdsp3 {
++	clocks = <&rpmhcc RPMH_CXO_CLK>;
++	clock-names = "xo";
++	interconnects = <&nsp_data_noc_3 MASTER_NSP3_PROC QCOM_ICC_TAG_ALWAYS
++			 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
++	power-domains = <&rpmhpd RPMHPD_CX>,
++			<&rpmhpd RPMHPD_MX>,
++			<&rpmhpd RPMHPD_NSP3>;
++	power-domain-names = "cx",
++			     "mx",
++			     "nsp";
++};
++
+ &soc {
+ 	gcc: clock-controller@100000 {
+ 		compatible = "qcom,nord-gcc";
+diff --git a/arch/arm64/boot/dts/qcom/nord.dtsi b/arch/arm64/boot/dts/qcom/nord.dtsi
+index e203c8b8abb43..941d9aed59639 100644
+--- a/arch/arm64/boot/dts/qcom/nord.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord.dtsi
+@@ -937,6 +937,98 @@ smp2p_adsp_in: slave-kernel {
+ 		};
+ 	};
+ 
++	smp2p-cdsp0 {
++		compatible = "qcom,smp2p";
++		qcom,smem = <94>, <432>;
++		interrupts-extended = <&ipcc IPCC_MPROC_NSP0
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_MPROC_NSP0 IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <5>;
++
++		smp2p_cdsp0_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_cdsp0_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
++	smp2p-cdsp1 {
++		compatible = "qcom,smp2p";
++		qcom,smem = <617>, <616>;
++		interrupts-extended = <&ipcc IPCC_MPROC_NSP1
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_MPROC_NSP1 IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <69>;
++
++		smp2p_cdsp1_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_cdsp1_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
++	smp2p-cdsp2 {
++		compatible = "qcom,smp2p";
++		qcom,smem = <617>, <616>;
++		interrupts-extended = <&ipcc IPCC_MPROC_NSP2
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_MPROC_NSP2 IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <133>;
++
++		smp2p_cdsp2_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_cdsp2_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
++	smp2p-cdsp3 {
++		compatible = "qcom,smp2p";
++		qcom,smem = <617>, <616>;
++		interrupts-extended = <&ipcc IPCC_MPROC_NSP3
++					     IPCC_MPROC_SIGNAL_SMP2P
++					     IRQ_TYPE_EDGE_RISING>;
++		mboxes = <&ipcc IPCC_MPROC_NSP3 IPCC_MPROC_SIGNAL_SMP2P>;
++
++		qcom,local-pid = <0>;
++		qcom,remote-pid = <197>;
++
++		smp2p_cdsp3_out: master-kernel {
++			qcom,entry-name = "master-kernel";
++			#qcom,smem-state-cells = <1>;
++		};
++
++		smp2p_cdsp3_in: slave-kernel {
++			qcom,entry-name = "slave-kernel";
++			interrupt-controller;
++			#interrupt-cells = <2>;
++		};
++	};
++
+ 	soc: soc@0 {
+ 		compatible = "simple-bus";
+ 		#address-cells = <2>;
+@@ -2204,6 +2296,662 @@ watchdog@17826000 {
+ 			clocks = <&sleep_clk>;
+ 			interrupts = <GIC_ESPI 848 IRQ_TYPE_EDGE_RISING>;
+ 		};
++
++		remoteproc_cdsp0: remoteproc@1f300000 {
++			compatible = "qcom,nord-cdsp0-pas";
++			reg = <0x0 0x1f300000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 499 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp0_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp0_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp0_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp0_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp0_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog",
++					  "fatal",
++					  "ready",
++					  "handover",
++					  "stop-ack",
++					  "shutdown-ack";
++
++			memory-region = <&cdsp0_mem>,
++					<&q6_cdsp0_dtb_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_cdsp0_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_MPROC_NSP0
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_MPROC_NSP0
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				qcom,remote-pid = <5>;
++				label = "cdsp";
++
++				fastrpc {
++					compatible = "qcom,nord-fastrpc",
++						     "qcom,kaanapali-fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "cdsp";
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@1 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <1>;
++						iommus = <&apps_smmu_2 0x0301 0x0040>,
++							 <&apps_smmu_2 0x0341 0x0040>,
++							 <&apps_smmu_2 0x0361 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@2 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <2>;
++						iommus = <&apps_smmu_2 0x0302 0x0040>,
++							 <&apps_smmu_2 0x0342 0x0040>,
++							 <&apps_smmu_2 0x0362 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu_2 0x0303 0x0040>,
++							 <&apps_smmu_2 0x0343 0x0040>,
++							 <&apps_smmu_2 0x0363 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu_2 0x0304 0x0040>,
++							 <&apps_smmu_2 0x0344 0x0040>,
++							 <&apps_smmu_2 0x0364 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu_2 0x0305 0x0000>,
++							 <&apps_smmu_2 0x0345 0x0020>,
++							 <&apps_smmu_2 0x0365 0x0020>;
++						dma-coherent;
++					};
++
++					compute-cb@6 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <6>;
++						iommus = <&apps_smmu_2 0x0306 0x0040>,
++							 <&apps_smmu_2 0x0346 0x0040>,
++							 <&apps_smmu_2 0x0366 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@7 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <7>;
++						iommus = <&apps_smmu_2 0x0307 0x0040>,
++							 <&apps_smmu_2 0x0347 0x0040>,
++							 <&apps_smmu_2 0x0367 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@8 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <8>;
++						iommus = <&apps_smmu_2 0x0308 0x0040>,
++							 <&apps_smmu_2 0x0348 0x0040>,
++							 <&apps_smmu_2 0x0368 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@9 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <9>;
++						iommus = <&apps_smmu_2 0x0309 0x0040>,
++							 <&apps_smmu_2 0x0349 0x0040>,
++							 <&apps_smmu_2 0x0369 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@10 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <10>;
++						iommus = <&apps_smmu_2 0x030a 0x0040>,
++							 <&apps_smmu_2 0x034a 0x0040>,
++							 <&apps_smmu_2 0x036a 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@11 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <11>;
++						iommus = <&apps_smmu_2 0x030b 0x0040>,
++							 <&apps_smmu_2 0x034b 0x0040>,
++							 <&apps_smmu_2 0x036b 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@12 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <12>;
++						iommus = <&apps_smmu_2 0x030c 0x0040>,
++							 <&apps_smmu_2 0x034c 0x0040>,
++							 <&apps_smmu_2 0x036c 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@13 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <13>;
++						iommus = <&apps_smmu_2 0x030d 0x0000>,
++							 <&apps_smmu_2 0x034d 0x0020>,
++							 <&apps_smmu_2 0x036d 0x0020>;
++						dma-coherent;
++					};
++				};
++			};
++		};
++
++		remoteproc_cdsp1: remoteproc@1f700000 {
++			compatible = "qcom,nord-cdsp1-pas";
++			reg = <0x0 0x1f700000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 500 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp1_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp1_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp1_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp1_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp1_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog",
++					  "fatal",
++					  "ready",
++					  "handover",
++					  "stop-ack",
++					  "shutdown-ack";
++
++			memory-region = <&cdsp1_mem>,
++					<&q6_cdsp1_dtb_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_cdsp1_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_MPROC_NSP1
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_MPROC_NSP1
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				qcom,remote-pid = <69>;
++				label = "cdsp";
++
++				fastrpc {
++					compatible = "qcom,nord-fastrpc",
++						     "qcom,kaanapali-fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "cdsp1";
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@1 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <1>;
++						iommus = <&apps_smmu_2 0x0701 0x0040>,
++							 <&apps_smmu_2 0x0741 0x0040>,
++							 <&apps_smmu_2 0x0761 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@2 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <2>;
++						iommus = <&apps_smmu_2 0x0702 0x0040>,
++							 <&apps_smmu_2 0x0742 0x0040>,
++							 <&apps_smmu_2 0x0762 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu_2 0x0703 0x0040>,
++							 <&apps_smmu_2 0x0743 0x0040>,
++							 <&apps_smmu_2 0x0763 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu_2 0x0704 0x0040>,
++							 <&apps_smmu_2 0x0744 0x0040>,
++							 <&apps_smmu_2 0x0764 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu_2 0x0705 0x0000>,
++							 <&apps_smmu_2 0x0745 0x0020>,
++							 <&apps_smmu_2 0x0765 0x0020>;
++						dma-coherent;
++					};
++
++					compute-cb@6 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <6>;
++						iommus = <&apps_smmu_2 0x0706 0x0040>,
++							 <&apps_smmu_2 0x0746 0x0040>,
++							 <&apps_smmu_2 0x0766 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@7 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <7>;
++						iommus = <&apps_smmu_2 0x0707 0x0040>,
++							 <&apps_smmu_2 0x0747 0x0040>,
++							 <&apps_smmu_2 0x0767 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@8 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <8>;
++						iommus = <&apps_smmu_2 0x0708 0x0040>,
++							 <&apps_smmu_2 0x0748 0x0040>,
++							 <&apps_smmu_2 0x0768 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@9 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <9>;
++						iommus = <&apps_smmu_2 0x0709 0x0040>,
++							 <&apps_smmu_2 0x0749 0x0040>,
++							 <&apps_smmu_2 0x0769 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@10 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <10>;
++						iommus = <&apps_smmu_2 0x070a 0x0040>,
++							 <&apps_smmu_2 0x074a 0x0040>,
++							 <&apps_smmu_2 0x076a 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@11 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <11>;
++						iommus = <&apps_smmu_2 0x070b 0x0040>,
++							 <&apps_smmu_2 0x074b 0x0040>,
++							 <&apps_smmu_2 0x076b 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@12 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <12>;
++						iommus = <&apps_smmu_2 0x070c 0x0040>,
++							 <&apps_smmu_2 0x074c 0x0040>,
++							 <&apps_smmu_2 0x076c 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@13 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <13>;
++						iommus = <&apps_smmu_2 0x070d 0x0000>,
++							 <&apps_smmu_2 0x074d 0x0020>,
++							 <&apps_smmu_2 0x076d 0x0020>;
++						dma-coherent;
++					};
++				};
++			};
++		};
++
++		remoteproc_cdsp2: remoteproc@1fb00000 {
++			compatible = "qcom,nord-cdsp2-pas";
++			reg = <0x0 0x1fb00000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 501 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp2_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp2_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp2_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp2_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp2_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog",
++					  "fatal",
++					  "ready",
++					  "handover",
++					  "stop-ack",
++					  "shutdown-ack";
++
++			memory-region = <&cdsp2_mem>,
++					<&q6_cdsp2_dtb_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_cdsp2_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_MPROC_NSP2
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_MPROC_NSP2
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				qcom,remote-pid = <133>;
++				label = "cdsp";
++
++				fastrpc {
++					compatible = "qcom,nord-fastrpc",
++						     "qcom,kaanapali-fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "cdsp2";
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@1 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <1>;
++						iommus = <&apps_smmu_2 0x0b01 0x0040>,
++							 <&apps_smmu_2 0x0b41 0x0040>,
++							 <&apps_smmu_2 0x0b61 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@2 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <2>;
++						iommus = <&apps_smmu_2 0x0b02 0x0040>,
++							 <&apps_smmu_2 0x0b42 0x0040>,
++							 <&apps_smmu_2 0x0b62 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu_2 0x0b03 0x0040>,
++							 <&apps_smmu_2 0x0b43 0x0040>,
++							 <&apps_smmu_2 0x0b63 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu_2 0x0b04 0x0040>,
++							 <&apps_smmu_2 0x0b44 0x0040>,
++							 <&apps_smmu_2 0x0b64 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu_2 0x0b05 0x0000>,
++							 <&apps_smmu_2 0x0b45 0x0020>,
++							 <&apps_smmu_2 0x0b65 0x0020>;
++						dma-coherent;
++					};
++
++					compute-cb@6 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <6>;
++						iommus = <&apps_smmu_2 0x0b06 0x0040>,
++							 <&apps_smmu_2 0x0b46 0x0040>,
++							 <&apps_smmu_2 0x0b66 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@7 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <7>;
++						iommus = <&apps_smmu_2 0x0b07 0x0040>,
++							 <&apps_smmu_2 0x0b47 0x0040>,
++							 <&apps_smmu_2 0x0b67 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@8 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <8>;
++						iommus = <&apps_smmu_2 0x0b08 0x0040>,
++							 <&apps_smmu_2 0x0b48 0x0040>,
++							 <&apps_smmu_2 0x0b68 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@9 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <9>;
++						iommus = <&apps_smmu_2 0x0b09 0x0040>,
++							 <&apps_smmu_2 0x0b49 0x0040>,
++							 <&apps_smmu_2 0x0b69 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@10 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <10>;
++						iommus = <&apps_smmu_2 0x0b0a 0x0040>,
++							 <&apps_smmu_2 0x0b4a 0x0040>,
++							 <&apps_smmu_2 0x0b6a 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@11 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <11>;
++						iommus = <&apps_smmu_2 0x0b0b 0x0040>,
++							 <&apps_smmu_2 0x0b4b 0x0040>,
++							 <&apps_smmu_2 0x0b6b 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@12 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <12>;
++						iommus = <&apps_smmu_2 0x0b0c 0x0040>,
++							 <&apps_smmu_2 0x0b4c 0x0040>,
++							 <&apps_smmu_2 0x0b6c 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@13 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <13>;
++						iommus = <&apps_smmu_2 0x0b0d 0x0000>,
++							 <&apps_smmu_2 0x0b4d 0x0020>,
++							 <&apps_smmu_2 0x0b6d 0x0020>;
++						dma-coherent;
++					};
++				};
++			};
++		};
++
++		remoteproc_cdsp3: remoteproc@1ff00000 {
++			compatible = "qcom,nord-cdsp3-pas";
++			reg = <0x0 0x1ff00000 0x0 0x10000>;
++
++			interrupts-extended = <&intc GIC_SPI 505 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp3_in 0 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp3_in 1 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp3_in 2 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp3_in 3 IRQ_TYPE_EDGE_RISING>,
++					      <&smp2p_cdsp3_in 7 IRQ_TYPE_EDGE_RISING>;
++			interrupt-names = "wdog",
++					  "fatal",
++					  "ready",
++					  "handover",
++					  "stop-ack",
++					  "shutdown-ack";
++
++			memory-region = <&cdsp3_mem>,
++					<&q6_cdsp3_dtb_mem>;
++
++			qcom,qmp = <&aoss_qmp>;
++
++			qcom,smem-states = <&smp2p_cdsp3_out 0>;
++			qcom,smem-state-names = "stop";
++
++			status = "disabled";
++
++			glink-edge {
++				interrupts-extended = <&ipcc IPCC_MPROC_NSP3
++							     IPCC_MPROC_SIGNAL_GLINK_QMP
++							     IRQ_TYPE_EDGE_RISING>;
++				mboxes = <&ipcc IPCC_MPROC_NSP3
++						IPCC_MPROC_SIGNAL_GLINK_QMP>;
++				qcom,remote-pid = <197>;
++				label = "cdsp";
++
++				fastrpc {
++					compatible = "qcom,nord-fastrpc",
++						     "qcom,kaanapali-fastrpc";
++					qcom,glink-channels = "fastrpcglink-apps-dsp";
++					label = "cdsp3";
++					#address-cells = <1>;
++					#size-cells = <0>;
++
++					compute-cb@1 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <1>;
++						iommus = <&apps_smmu_2 0x0f01 0x0040>,
++							 <&apps_smmu_2 0x0f41 0x0040>,
++							 <&apps_smmu_2 0x0f61 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@2 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <2>;
++						iommus = <&apps_smmu_2 0x0f02 0x0040>,
++							 <&apps_smmu_2 0x0f42 0x0040>,
++							 <&apps_smmu_2 0x0f62 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@3 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <3>;
++						iommus = <&apps_smmu_2 0x0f03 0x0040>,
++							 <&apps_smmu_2 0x0f43 0x0040>,
++							 <&apps_smmu_2 0x0f63 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@4 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <4>;
++						iommus = <&apps_smmu_2 0x0f04 0x0040>,
++							 <&apps_smmu_2 0x0f44 0x0040>,
++							 <&apps_smmu_2 0x0f64 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@5 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <5>;
++						iommus = <&apps_smmu_2 0x0f05 0x0000>,
++							 <&apps_smmu_2 0x0f45 0x0020>,
++							 <&apps_smmu_2 0x0f65 0x0020>;
++						dma-coherent;
++					};
++
++					compute-cb@6 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <6>;
++						iommus = <&apps_smmu_2 0x0f06 0x0040>,
++							 <&apps_smmu_2 0x0f46 0x0040>,
++							 <&apps_smmu_2 0x0f66 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@7 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <7>;
++						iommus = <&apps_smmu_2 0x0f07 0x0040>,
++							 <&apps_smmu_2 0x0f47 0x0040>,
++							 <&apps_smmu_2 0x0f67 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@8 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <8>;
++						iommus = <&apps_smmu_2 0x0f08 0x0040>,
++							 <&apps_smmu_2 0x0f48 0x0040>,
++							 <&apps_smmu_2 0x0f68 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@9 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <9>;
++						iommus = <&apps_smmu_2 0x0f09 0x0040>,
++							 <&apps_smmu_2 0x0f49 0x0040>,
++							 <&apps_smmu_2 0x0f69 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@10 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <10>;
++						iommus = <&apps_smmu_2 0x0f0a 0x0040>,
++							 <&apps_smmu_2 0x0f4a 0x0040>,
++							 <&apps_smmu_2 0x0f6a 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@11 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <11>;
++						iommus = <&apps_smmu_2 0x0f0b 0x0040>,
++							 <&apps_smmu_2 0x0f4b 0x0040>,
++							 <&apps_smmu_2 0x0f6b 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@12 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <12>;
++						iommus = <&apps_smmu_2 0x0f0c 0x0040>,
++							 <&apps_smmu_2 0x0f4c 0x0040>,
++							 <&apps_smmu_2 0x0f6c 0x0000>;
++						dma-coherent;
++					};
++
++					compute-cb@13 {
++						compatible = "qcom,fastrpc-compute-cb";
++						reg = <13>;
++						iommus = <&apps_smmu_2 0x0f0d 0x0000>,
++							 <&apps_smmu_2 0x0f4d 0x0020>,
++							 <&apps_smmu_2 0x0f6d 0x0020>;
++						dma-coherent;
++					};
++				};
++			};
++		};
+ 	};
+ 
+ 	arch_timer: timer {
+-- 
+2.43.0
+

@@ -1,0 +1,28 @@
+From 7bf26a338b231ac613b34ca809a3c73db65d69ee Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Mon, 18 May 2026 17:01:49 +0800
+Subject: [PATCH 4/6] dt-bindings: misc: qcom,fastrpc: Add label for cdsp2 and
+ cdsp3
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ Documentation/devicetree/bindings/misc/qcom,fastrpc.yaml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/misc/qcom,fastrpc.yaml b/Documentation/devicetree/bindings/misc/qcom,fastrpc.yaml
+index 24fc0752c11a6..47e5976c87438 100644
+--- a/Documentation/devicetree/bindings/misc/qcom,fastrpc.yaml
++++ b/Documentation/devicetree/bindings/misc/qcom,fastrpc.yaml
+@@ -36,6 +36,8 @@ properties:
+       - sdsp
+       - cdsp
+       - cdsp1
++      - cdsp2
++      - cdsp3
+       - gdsp0
+       - gdsp1
+ 
+-- 
+2.43.0
+
