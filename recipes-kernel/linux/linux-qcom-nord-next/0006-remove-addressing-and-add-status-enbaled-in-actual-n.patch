@@ -1,0 +1,78 @@
+From 5c261f780dcacb87e468b18e5ae1030b4801e6b7 Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Wed, 15 Jul 2026 17:03:51 +0530
+Subject: [PATCH] remove addressing and add status enbaled in actual node
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 29 +++++----------------
+ 1 file changed, 7 insertions(+), 22 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 7d70a4f4c175..2f5389f334ee 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -1754,8 +1754,10 @@ usb_1_hsphy: phy@88ea000 {
+ 
+ 		resets = <&negcc NE_GCC_QUSB2PHY_PRIM_BCR>;
+ 
++		vdd-supply = <&vreg_l1h_0p9>;
++		vdda12-supply = <&vreg_l2h_1p2>;
+ 
+-		status = "disabled";
++		phys = <&eusb2_redriver>;
+ 	};
+ 
+ 	/*
+@@ -1788,7 +1790,9 @@ usb_dp_qmpphy: phy@88e1000 {
+ 		mode-switch;
+ 		orientation-switch;
+ 
+-		status = "disabled";
++		vdda-phy-supply = <&vreg_l2k_0p9>;
++		vdda-pll-supply = <&vreg_l2h_1p2>;
++		status = "okay";
+ 
+ 		ports {
+ 			#address-cells = <1>;
+@@ -1900,11 +1904,10 @@ &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+ 		snps,has-lpm-erratum;
+ 		tx-fifo-resize;
+ 
++		dr_mode = "peripheral";
+ 		dma-coherent;
+ 		usb-role-switch;
+ 
+-		status = "disabled";
+-
+ 		ports {
+ 			#address-cells = <1>;
+ 			#size-cells = <0>;
+@@ -1927,23 +1930,5 @@ usb_1_dwc3_ss: endpoint {
+ 	};
+ };
+ 
+-/* USB — enable controller and PHYs; regulators added below */
+-&usb_1_hsphy {
+-	vdd-supply = <&vreg_l1h_0p9>;
+-	vdda12-supply = <&vreg_l2h_1p2>;
+-
+-	phys = <&eusb2_redriver>;
+-
+-	status = "okay";
+-};
+-
+ &usb_dp_qmpphy {
+-	vdda-phy-supply = <&vreg_l2k_0p9>;
+-	vdda-pll-supply = <&vreg_l2h_1p2>;
+-	status = "okay";
+-};
+-
+-&usb_1 {
+-	dr_mode = "peripheral";
+-	status = "okay";
+ };
+-- 
+2.34.1
+

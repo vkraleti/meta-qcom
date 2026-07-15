@@ -31,13 +31,19 @@ SRC_URI += " \
     file://0004-dt-bindings-misc-qcom-fastrpc-Add-label-for-cdsp2-an.patch \
     file://0005-arm64-dts-qcom-nord-Add-support-for-CDSPs.patch \
     file://0006-DEBUG-remoteproc-Serialize-rproc-boot-start.patch \
+    file://0001-dt-binding-qcom-snps-dwc3-Add-Nord-compatible-to-sup.patch \
+    file://0002-dt-bindings-phy-qcom-sc8280xp-qmp-usb43dp-phy-Add-No.patch \
+    file://0003-dt-bindings-phy-qcom-snps-eusb2-phy-Document-eUSB2-P.patch \
+    file://0004-phy-qcom-qmp-combo-Add-qmp-configuration-for-Nord.patch \
+    file://0005-arm64-dts-qcom-Add-changes-to-enable-primary-USB-con.patch \
+    file://0006-remove-addressing-and-add-status-enbaled-in-actual-n.patch \
+    file://0007-move-usb-node-from-under-ufshc-to-soc.patch \
 "
 
 S = "${UNPACKDIR}/${BP}"
 
 KBUILD_DEFCONFIG ?= "defconfig"
 KBUILD_DEFCONFIG:qcom-armv7a = "qcom_defconfig"
-
 
 do_configure:prepend() {
     # Use a copy of the 'defconfig' from the actual repo to merge fragments

@@ -1,0 +1,29 @@
+From 662ece290bb20637a9e67e73354e15257fdd4cc4 Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Tue, 14 Jul 2026 22:27:35 +0530
+Subject: [PATCH 3/5] dt-bindings: phy: qcom,snps-eusb2-phy: Document eUSB2 PHY
+ on nord
+
+Document the Synopsys eUSB2 PHY for Nord which handles the USB2 path.
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml b/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
+index 096f6b546632..a88b840f7a41 100644
+--- a/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
++++ b/Documentation/devicetree/bindings/phy/qcom,snps-eusb2-phy.yaml
+@@ -19,6 +19,7 @@ properties:
+           - enum:
+               - qcom,eliza-snps-eusb2-phy
+               - qcom,milos-snps-eusb2-phy
++              - qcom,nord-snps-eusb2-phy
+               - qcom,sar2130p-snps-eusb2-phy
+               - qcom,sdx75-snps-eusb2-phy
+               - qcom,sm8650-snps-eusb2-phy
+-- 
+2.34.1
+

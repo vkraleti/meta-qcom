@@ -1,0 +1,46 @@
+From 75cf396c77783d0aa187959548f7ab71a21b4177 Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Tue, 14 Jul 2026 22:25:57 +0530
+Subject: [PATCH 1/5] dt-binding: qcom,snps-dwc3: Add Nord compatible to
+ supported device list
+
+Add Maili compatible to supported device list. Nord has two SuperSpeed
+USB controllers and one high-speed controller.
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ Documentation/devicetree/bindings/usb/qcom,snps-dwc3.yaml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/usb/qcom,snps-dwc3.yaml b/Documentation/devicetree/bindings/usb/qcom,snps-dwc3.yaml
+index d99af9f413d0..3a5cf2e2bb31 100644
+--- a/Documentation/devicetree/bindings/usb/qcom,snps-dwc3.yaml
++++ b/Documentation/devicetree/bindings/usb/qcom,snps-dwc3.yaml
+@@ -37,6 +37,7 @@ properties:
+           - qcom,ipq9574-dwc3
+           - qcom,kaanapali-dwc3
+           - qcom,milos-dwc3
++          - qcom,nord-dwc3
+           - qcom,msm8953-dwc3
+           - qcom,msm8994-dwc3
+           - qcom,msm8996-dwc3
+@@ -353,6 +354,7 @@ allOf:
+             enum:
+               - qcom,eliza-dwc3
+               - qcom,milos-dwc3
++              - qcom,nord-dwc3
+               - qcom,qcm2290-dwc3
+               - qcom,qcs615-dwc3
+               - qcom,sar2130p-dwc3
+@@ -543,6 +545,7 @@ allOf:
+               - qcom,ipq4019-dwc3
+               - qcom,ipq8064-dwc3
+               - qcom,kaanapali-dwc3
++              - qcom,nord-dwc3
+               - qcom,qcs615-dwc3
+               - qcom,qcs8300-dwc3
+               - qcom,qdu1000-dwc3
+-- 
+2.34.1
+

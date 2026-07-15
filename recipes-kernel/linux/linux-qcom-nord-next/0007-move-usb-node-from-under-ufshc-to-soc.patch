@@ -1,0 +1,416 @@
+From c053652e33fdaa0a150a727b89647008dc2963e7 Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Wed, 15 Jul 2026 18:07:58 +0530
+Subject: [PATCH] move usb node from under ufshc to soc
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 384 ++++++++++----------
+ 1 file changed, 194 insertions(+), 190 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 2f5389f334ee..3dcfc5368770 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -757,6 +757,200 @@ tcsrcc: clock-controller@f1d9000 {
+ 		#reset-cells = <1>;
+ 	};
+ 
++	/* USB */
++	/*
++	 * eUSB2 HS PHY  (0x088ea000)
++	 */
++	usb_1_hsphy: phy@88ea000 {
++		compatible = "qcom,nord-snps-eusb2-phy",
++			     "qcom,sm8550-snps-eusb2-phy";
++		reg = <0x0 0x088ea000 0x0 0x154>;
++		#phy-cells = <0>;
++
++		clocks = <&tcsrcc TCSR_USB2_0_CLKREF_EN>;
++		clock-names = "ref";
++
++		resets = <&negcc NE_GCC_QUSB2PHY_PRIM_BCR>;
++
++		vdd-supply = <&vreg_l1h_0p9>;
++		vdda12-supply = <&vreg_l2h_1p2>;
++
++		phys = <&eusb2_redriver>;
++
++		status = "okay";
++	};
++
++	/*
++	 * QMP USB3 + DP combo PHY  (0x088e1000)
++	 */
++	usb_dp_qmpphy: phy@88e1000 {
++		compatible = "qcom,nord-qmp-usb3-dp-phy";
++		reg = <0x0 0x088e1000 0x0 0x3000>;
++
++		clocks = <&negcc NE_GCC_USB3_PRIM_PHY_AUX_CLK>,
++			 <&rpmhcc RPMH_CXO_CLK>,
++			 <&negcc NE_GCC_USB3_PRIM_PHY_COM_AUX_CLK>,
++			 <&negcc NE_GCC_USB3_PRIM_PHY_PIPE_CLK>;
++		clock-names = "aux",
++			      "ref",
++			      "com_aux",
++			      "usb3_pipe";
++
++		resets = <&negcc NE_GCC_USB3_PHY_PRIM_BCR>,
++			 <&negcc NE_GCC_USB3_DP_PHY_PRIM_BCR>;
++		reset-names = "phy",
++			      "common";
++
++		power-domains = <&negcc NE_GCC_USB3_PHY_GDSC>;
++
++
++		#clock-cells = <1>;
++		#phy-cells = <1>;
++
++		mode-switch;
++		orientation-switch;
++
++		vdda-phy-supply = <&vreg_l2k_0p9>;
++		vdda-pll-supply = <&vreg_l2h_1p2>;
++		status = "okay";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				usb_dp_qmpphy_out: endpoint {
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++
++				usb_dp_qmpphy_usb_ss_in: endpoint {
++					remote-endpoint = <&usb_1_dwc3_ss>;
++				};
++			};
++
++			port@2 {
++				reg = <2>;
++
++				usb_dp_qmpphy_dp_in: endpoint {
++					/* remote-endpoint = <&mdss_dp0_out>; */
++				};
++			};
++		};
++	};
++
++	/*
++	 * DWC3 USB wrapper  (0x0a600000)
++	 *
++	 * Flattened structure per qcom,snps-dwc3.yaml:
++	 * controller properties (clocks, interrupts, phys, interconnects,
++	 * snps quirks) all live directly on this node — no separate child
++	 * snps,dwc3 sub-node.
++	 *
++	 * interrupt-names for qcom,nord-dwc3 (same rule as qcom,sm8650-dwc3):
++	 *   dwc_usb3, pwr_event, hs_phy_irq, dp_hs_phy_irq,
++	 *   dm_hs_phy_irq, ss_phy_irq  (minItems 5, maxItems 6)
++	 */
++	usb_1: usb@a600000 {
++		compatible = "qcom,nord-dwc3", "qcom,snps-dwc3";
++		reg = <0x0 0x0a600000 0x0 0xfc100>;
++
++		interrupts-extended = <&intc GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&intc GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&intc GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&pdc 750 IRQ_TYPE_EDGE_RISING>,
++				      <&pdc 760 IRQ_TYPE_EDGE_RISING>,
++				      <&pdc 762 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "dwc_usb3",
++				  "pwr_event",
++				  "hs_phy_irq",
++				  "dp_hs_phy_irq",
++				  "dm_hs_phy_irq",
++				  "ss_phy_irq";
++
++		clocks = <&negcc NE_GCC_CNOC_USB3_PRIM_AXI_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>,
++			 <&negcc NE_GCC_AGGRE_NOC_USB3_PRIM_AXI_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_SLEEP_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
++			 <&tcsrcc TCSR_USB3_0_CLKREF_EN>;
++		clock-names = "cfg_noc",
++			      "core",
++			      "iface",
++			      "sleep",
++			      "mock_utmi",
++			      "xo";
++
++		assigned-clocks = <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
++				  <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>;
++		assigned-clock-rates = <19200000>, <200000000>;
++
++		resets = <&negcc NE_GCC_USB31_PRIM_BCR>;
++
++		phys = <&usb_1_hsphy>,
++		       <&usb_dp_qmpphy QMP_USB43DP_USB3_PHY>;
++		phy-names = "usb2-phy",
++			    "usb3-phy";
++		/*
++		 *   usb-ddr  : aggre1_noc_tile MASTER_USB3_0 -> mc_virt SLAVE_EBI1
++		 *   apps-usb : hscnoc MASTER_APPSS_PROC -> config_noc SLAVE_USB3_0
++		 */
++		/*
++		interconnects = <&aggre1_noc_tile MASTER_USB3_0 QCOM_ICC_TAG_ALWAYS
++				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
++				<&hscnoc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
++				 &config_noc SLAVE_USB3_0 QCOM_ICC_TAG_ACTIVE_ONLY>;
++		interconnect-names = "usb-ddr",
++				     "apps-usb";
++		*/
++		iommus = <&apps_smmu_0 0x1500 0x0>;
++
++		power-domains = <&negcc NE_GCC_USB31_PRIM_GDSC>;
++		required-opps = <&rpmhpd_opp_nom>;
++
++		snps,hird-threshold = /bits/ 8 <0x0>;
++		snps,usb2-gadget-lpm-disable;
++		snps,dis_u2_susphy_quirk;
++		snps,dis_enblslpm_quirk;
++		snps,dis-u1-entry-quirk;
++		snps,dis-u2-entry-quirk;
++		snps,is-utmi-l1-suspend;
++		snps,usb3_lpm_capable;
++		snps,usb2-lpm-disable;
++		snps,has-lpm-erratum;
++		tx-fifo-resize;
++
++		dr_mode = "peripheral";
++		dma-coherent;
++		usb-role-switch;
++
++		status = "okay";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				usb_1_dwc3_hs: endpoint {
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++
++				usb_1_dwc3_ss: endpoint {
++					remote-endpoint = <&usb_dp_qmpphy_usb_ss_in>;
++				};
++			};
++		};
++	};
++
+ 	apps_rsc: rsc@18900000 {
+ 		compatible = "qcom,rpmh-rsc";
+ 		reg = <0x0 0x18900000 0x0 0x10000>,
+@@ -1738,196 +1932,6 @@ opp-403000000 {
+ 			required-opps = <&rpmhpd_opp_nom>;
+ 		};
+ 	};
+-
+-	/* USB */
+-	/*
+-	 * eUSB2 HS PHY  (0x088ea000)
+-	 */
+-	usb_1_hsphy: phy@88ea000 {
+-		compatible = "qcom,nord-snps-eusb2-phy",
+-			     "qcom,sm8550-snps-eusb2-phy";
+-		reg = <0x0 0x088ea000 0x0 0x154>;
+-		#phy-cells = <0>;
+-
+-		clocks = <&tcsrcc TCSR_USB2_0_CLKREF_EN>;
+-		clock-names = "ref";
+-
+-		resets = <&negcc NE_GCC_QUSB2PHY_PRIM_BCR>;
+-
+-		vdd-supply = <&vreg_l1h_0p9>;
+-		vdda12-supply = <&vreg_l2h_1p2>;
+-
+-		phys = <&eusb2_redriver>;
+-	};
+-
+-	/*
+-	 * QMP USB3 + DP combo PHY  (0x088e1000)
+-	 */
+-	usb_dp_qmpphy: phy@88e1000 {
+-		compatible = "qcom,nord-qmp-usb3-dp-phy";
+-		reg = <0x0 0x088e1000 0x0 0x3000>;
+-
+-		clocks = <&negcc NE_GCC_USB3_PRIM_PHY_AUX_CLK>,
+-			 <&rpmhcc RPMH_CXO_CLK>,
+-			 <&negcc NE_GCC_USB3_PRIM_PHY_COM_AUX_CLK>,
+-			 <&negcc NE_GCC_USB3_PRIM_PHY_PIPE_CLK>;
+-		clock-names = "aux",
+-			      "ref",
+-			      "com_aux",
+-			      "usb3_pipe";
+-
+-		resets = <&negcc NE_GCC_USB3_PHY_PRIM_BCR>,
+-			 <&negcc NE_GCC_USB3_DP_PHY_PRIM_BCR>;
+-		reset-names = "phy",
+-			      "common";
+-
+-		power-domains = <&negcc NE_GCC_USB3_PHY_GDSC>;
+-
+-
+-		#clock-cells = <1>;
+-		#phy-cells = <1>;
+-
+-		mode-switch;
+-		orientation-switch;
+-
+-		vdda-phy-supply = <&vreg_l2k_0p9>;
+-		vdda-pll-supply = <&vreg_l2h_1p2>;
+-		status = "okay";
+-
+-		ports {
+-			#address-cells = <1>;
+-			#size-cells = <0>;
+-
+-			port@0 {
+-				reg = <0>;
+-
+-				usb_dp_qmpphy_out: endpoint {
+-				};
+-			};
+-
+-			port@1 {
+-				reg = <1>;
+-
+-				usb_dp_qmpphy_usb_ss_in: endpoint {
+-					remote-endpoint = <&usb_1_dwc3_ss>;
+-				};
+-			};
+-
+-			port@2 {
+-				reg = <2>;
+-
+-				usb_dp_qmpphy_dp_in: endpoint {
+-					/* remote-endpoint = <&mdss_dp0_out>; */
+-				};
+-			};
+-		};
+-	};
+-
+-	/*
+-	 * DWC3 USB wrapper  (0x0a600000)
+-	 *
+-	 * Flattened structure per qcom,snps-dwc3.yaml:
+-	 * controller properties (clocks, interrupts, phys, interconnects,
+-	 * snps quirks) all live directly on this node — no separate child
+-	 * snps,dwc3 sub-node.
+-	 *
+-	 * interrupt-names for qcom,nord-dwc3 (same rule as qcom,sm8650-dwc3):
+-	 *   dwc_usb3, pwr_event, hs_phy_irq, dp_hs_phy_irq,
+-	 *   dm_hs_phy_irq, ss_phy_irq  (minItems 5, maxItems 6)
+-	 */
+-	usb_1: usb@a600000 {
+-		compatible = "qcom,nord-dwc3", "qcom,snps-dwc3";
+-		reg = <0x0 0x0a600000 0x0 0xfc100>;
+-
+-		interrupts-extended = <&intc GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH 0>,
+-				      <&intc GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH 0>,
+-				      <&intc GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH 0>,
+-				      <&pdc 750 IRQ_TYPE_EDGE_RISING>,
+-				      <&pdc 760 IRQ_TYPE_EDGE_RISING>,
+-				      <&pdc 762 IRQ_TYPE_LEVEL_HIGH>;
+-		interrupt-names = "dwc_usb3",
+-				  "pwr_event",
+-				  "hs_phy_irq",
+-				  "dp_hs_phy_irq",
+-				  "dm_hs_phy_irq",
+-				  "ss_phy_irq";
+-
+-		clocks = <&negcc NE_GCC_CNOC_USB3_PRIM_AXI_CLK>,
+-			 <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>,
+-			 <&negcc NE_GCC_AGGRE_NOC_USB3_PRIM_AXI_CLK>,
+-			 <&negcc NE_GCC_USB31_PRIM_SLEEP_CLK>,
+-			 <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
+-			 <&tcsrcc TCSR_USB3_0_CLKREF_EN>;
+-		clock-names = "cfg_noc",
+-			      "core",
+-			      "iface",
+-			      "sleep",
+-			      "mock_utmi",
+-			      "xo";
+-
+-		assigned-clocks = <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
+-				  <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>;
+-		assigned-clock-rates = <19200000>, <200000000>;
+-
+-		resets = <&negcc NE_GCC_USB31_PRIM_BCR>;
+-
+-		phys = <&usb_1_hsphy>,
+-		       <&usb_dp_qmpphy QMP_USB43DP_USB3_PHY>;
+-		phy-names = "usb2-phy",
+-			    "usb3-phy";
+-		/*
+-		 *   usb-ddr  : aggre1_noc_tile MASTER_USB3_0 -> mc_virt SLAVE_EBI1
+-		 *   apps-usb : hscnoc MASTER_APPSS_PROC -> config_noc SLAVE_USB3_0
+-		 */
+-		/*
+-		interconnects = <&aggre1_noc_tile MASTER_USB3_0 QCOM_ICC_TAG_ALWAYS
+-				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+-				<&hscnoc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+-				 &config_noc SLAVE_USB3_0 QCOM_ICC_TAG_ACTIVE_ONLY>;
+-		interconnect-names = "usb-ddr",
+-				     "apps-usb";
+-		*/
+-		iommus = <&apps_smmu_0 0x1500 0x0>;
+-
+-		power-domains = <&negcc NE_GCC_USB31_PRIM_GDSC>;
+-		required-opps = <&rpmhpd_opp_nom>;
+-
+-		snps,hird-threshold = /bits/ 8 <0x0>;
+-		snps,usb2-gadget-lpm-disable;
+-		snps,dis_u2_susphy_quirk;
+-		snps,dis_enblslpm_quirk;
+-		snps,dis-u1-entry-quirk;
+-		snps,dis-u2-entry-quirk;
+-		snps,is-utmi-l1-suspend;
+-		snps,usb3_lpm_capable;
+-		snps,usb2-lpm-disable;
+-		snps,has-lpm-erratum;
+-		tx-fifo-resize;
+-
+-		dr_mode = "peripheral";
+-		dma-coherent;
+-		usb-role-switch;
+-
+-		ports {
+-			#address-cells = <1>;
+-			#size-cells = <0>;
+-
+-			port@0 {
+-				reg = <0>;
+-
+-				usb_1_dwc3_hs: endpoint {
+-				};
+-			};
+-
+-			port@1 {
+-				reg = <1>;
+-
+-				usb_1_dwc3_ss: endpoint {
+-					remote-endpoint = <&usb_dp_qmpphy_usb_ss_in>;
+-				};
+-			};
+-		};
+-	};
+ };
+ 
+ &usb_dp_qmpphy {
+-- 
+2.34.1
+

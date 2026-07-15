@@ -1,0 +1,310 @@
+From d5c98d64e3c954cf90894d2098b93202980033ae Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Tue, 14 Jul 2026 22:30:27 +0530
+Subject: [PATCH 5/5] arm64: dts: qcom: Add changes to enable primary USB
+ controller on Nord
+
+Add following changes to enable primary USB controller on Nord:
+- Primary controller node
+- Primary High Speed phy node
+- Primary QMP Phy node
+- NXP PTN3222 repeater node
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/iq10-rrd.dts       |   8 +
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 220 +++++++++++++++++++-
+ arch/arm64/boot/dts/qcom/nord.dtsi          |   6 +
+ 3 files changed, 233 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/iq10-rrd.dts b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+index 72967179934a..037e573ebfbf 100644
+--- a/arch/arm64/boot/dts/qcom/iq10-rrd.dts
++++ b/arch/arm64/boot/dts/qcom/iq10-rrd.dts
+@@ -67,6 +67,14 @@ ufs_vccq2: regulator-ufs-vccq2 {
+ 		regulator-max-microvolt = <1800000>;
+ 		regulator-always-on;
+ 	};
++
++	vreg_pre_reg_3p3: regulator-pre-reg-3p3 {
++		compatible = "regulator-fixed";
++		regulator-name = "vreg_pre_reg_3p3";
++		regulator-min-microvolt = <3300000>;
++		regulator-max-microvolt = <3300000>;
++		regulator-always-on;
++	};
+ };
+ 
+ &apps_rsc {
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 082211f958f1..a47f51e6400d 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -3,6 +3,7 @@
+  * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ 
++#include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/clock/qcom,nord-gcc.h>
+ #include <dt-bindings/clock/qcom,nord-negcc.h>
+ #include <dt-bindings/clock/qcom,nord-nwgcc.h>
+@@ -13,7 +14,6 @@
+ #include <dt-bindings/interconnect/qcom,nord-rpmh.h>
+ #include <dt-bindings/power/qcom-rpmpd.h>
+ #include <dt-bindings/soc/qcom,rpmh-rsc.h>
+-
+ #include "nord.dtsi"
+ 
+ / {
+@@ -160,6 +160,16 @@ &config_noc SLAVE_QUP_1 QCOM_ICC_TAG_ALWAYS>,
+ 	interconnect-names = "qup-core", "qup-config", "qup-memory";
+ 	pinctrl-0 = <&qup_i2c9_default>;
+ 	pinctrl-names = "default";
++	status = "okay";
++
++	eusb2_redriver: redriver@43 {
++		compatible = "nxp,ptn3222";
++		reg = <0x43>;
++		#phy-cells = <0>;
++		vdd1v8-supply = <&vreg_l3l_1p8>;
++		vdd3v3-supply = <&vreg_pre_reg_3p3>;
++	//	reset-gpios = <&tlmm 175 GPIO_ACTIVE_LOW>;
++	};
+ };
+ 
+ &i2c10 {
+@@ -1791,4 +1801,212 @@ opp-403000000 {
+ 			required-opps = <&rpmhpd_opp_nom>;
+ 		};
+ 	};
++
++	/* USB */
++	/*
++	 * eUSB2 HS PHY  (0x088ea000)
++	 */
++	usb_1_hsphy: phy@88ea000 {
++		compatible = "qcom,nord-snps-eusb2-phy",
++			     "qcom,sm8550-snps-eusb2-phy";
++		reg = <0x0 0x088ea000 0x0 0x154>;
++		#phy-cells = <0>;
++
++		clocks = <&tcsrcc TCSR_USB2_0_CLKREF_EN>;
++		clock-names = "ref";
++
++		resets = <&negcc NE_GCC_QUSB2PHY_PRIM_BCR>;
++
++
++		status = "disabled";
++	};
++
++	/*
++	 * QMP USB3 + DP combo PHY  (0x088e1000)
++	 */
++	usb_dp_qmpphy: phy@88e1000 {
++		compatible = "qcom,nord-qmp-usb3-dp-phy";
++		reg = <0x0 0x088e1000 0x0 0x3000>;
++
++		clocks = <&negcc NE_GCC_USB3_PRIM_PHY_AUX_CLK>,
++			 <&rpmhcc RPMH_CXO_CLK>,
++			 <&negcc NE_GCC_USB3_PRIM_PHY_COM_AUX_CLK>,
++			 <&negcc NE_GCC_USB3_PRIM_PHY_PIPE_CLK>;
++		clock-names = "aux",
++			      "ref",
++			      "com_aux",
++			      "usb3_pipe";
++
++		resets = <&negcc NE_GCC_USB3_PHY_PRIM_BCR>,
++			 <&negcc NE_GCC_USB3_DP_PHY_PRIM_BCR>;
++		reset-names = "phy",
++			      "common";
++
++		power-domains = <&negcc NE_GCC_USB3_PHY_GDSC>;
++
++
++		#clock-cells = <1>;
++		#phy-cells = <1>;
++
++		mode-switch;
++		orientation-switch;
++
++		status = "disabled";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				usb_dp_qmpphy_out: endpoint {
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++
++				usb_dp_qmpphy_usb_ss_in: endpoint {
++					remote-endpoint = <&usb_1_dwc3_ss>;
++				};
++			};
++
++			port@2 {
++				reg = <2>;
++
++				usb_dp_qmpphy_dp_in: endpoint {
++					/* remote-endpoint = <&mdss_dp0_out>; */
++				};
++			};
++		};
++	};
++
++	/*
++	 * DWC3 USB wrapper  (0x0a600000)
++	 *
++	 * Flattened structure per qcom,snps-dwc3.yaml:
++	 * controller properties (clocks, interrupts, phys, interconnects,
++	 * snps quirks) all live directly on this node — no separate child
++	 * snps,dwc3 sub-node.
++	 *
++	 * interrupt-names for qcom,nord-dwc3 (same rule as qcom,sm8650-dwc3):
++	 *   dwc_usb3, pwr_event, hs_phy_irq, dp_hs_phy_irq,
++	 *   dm_hs_phy_irq, ss_phy_irq  (minItems 5, maxItems 6)
++	 */
++	usb_1: usb@a600000 {
++		compatible = "qcom,nord-dwc3", "qcom,snps-dwc3";
++		reg = <0x0 0x0a600000 0x0 0xfc100>;
++
++		interrupts-extended = <&intc GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&intc GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&intc GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH 0>,
++				      <&pdc 750 IRQ_TYPE_EDGE_RISING>,
++				      <&pdc 760 IRQ_TYPE_EDGE_RISING>,
++				      <&pdc 762 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "dwc_usb3",
++				  "pwr_event",
++				  "hs_phy_irq",
++				  "dp_hs_phy_irq",
++				  "dm_hs_phy_irq",
++				  "ss_phy_irq";
++
++		clocks = <&negcc NE_GCC_CNOC_USB3_PRIM_AXI_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>,
++			 <&negcc NE_GCC_AGGRE_NOC_USB3_PRIM_AXI_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_SLEEP_CLK>,
++			 <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
++			 <&tcsrcc TCSR_USB3_0_CLKREF_EN>;
++		clock-names = "cfg_noc",
++			      "core",
++			      "iface",
++			      "sleep",
++			      "mock_utmi",
++			      "xo";
++
++		assigned-clocks = <&negcc NE_GCC_USB31_PRIM_MOCK_UTMI_CLK>,
++				  <&negcc NE_GCC_USB31_PRIM_MASTER_CLK>;
++		assigned-clock-rates = <19200000>, <200000000>;
++
++		resets = <&negcc NE_GCC_USB31_PRIM_BCR>;
++
++		phys = <&usb_1_hsphy>,
++		       <&usb_dp_qmpphy QMP_USB43DP_USB3_PHY>;
++		phy-names = "usb2-phy",
++			    "usb3-phy";
++		/*
++		 *   usb-ddr  : aggre1_noc_tile MASTER_USB3_0 -> mc_virt SLAVE_EBI1
++		 *   apps-usb : hscnoc MASTER_APPSS_PROC -> config_noc SLAVE_USB3_0
++		 */
++		/*
++		interconnects = <&aggre1_noc_tile MASTER_USB3_0 QCOM_ICC_TAG_ALWAYS
++				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
++				<&hscnoc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
++				 &config_noc SLAVE_USB3_0 QCOM_ICC_TAG_ACTIVE_ONLY>;
++		interconnect-names = "usb-ddr",
++				     "apps-usb";
++		*/
++		iommus = <&apps_smmu_0 0x1500 0x0>;
++
++		power-domains = <&negcc NE_GCC_USB31_PRIM_GDSC>;
++		required-opps = <&rpmhpd_opp_nom>;
++
++		snps,hird-threshold = /bits/ 8 <0x0>;
++		snps,usb2-gadget-lpm-disable;
++		snps,dis_u2_susphy_quirk;
++		snps,dis_enblslpm_quirk;
++		snps,dis-u1-entry-quirk;
++		snps,dis-u2-entry-quirk;
++		snps,is-utmi-l1-suspend;
++		snps,usb3_lpm_capable;
++		snps,usb2-lpm-disable;
++		snps,has-lpm-erratum;
++		tx-fifo-resize;
++
++		dma-coherent;
++		usb-role-switch;
++
++		status = "disabled";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++
++				usb_1_dwc3_hs: endpoint {
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++
++				usb_1_dwc3_ss: endpoint {
++					remote-endpoint = <&usb_dp_qmpphy_usb_ss_in>;
++				};
++			};
++		};
++	};
++};
++
++/* USB — enable controller and PHYs; regulators added below */
++&usb_1_hsphy {
++	vdd-supply = <&vreg_l1h_0p9>;
++	vdda12-supply = <&vreg_l2h_1p2>;
++
++	phys = <&eusb2_redriver>;
++
++	status = "okay";
++};
++
++&usb_dp_qmpphy {
++	vdda-phy-supply = <&vreg_l2k_0p9>;
++	vdda-pll-supply = <&vreg_l2h_1p2>;
++	status = "okay";
++};
++
++&usb_1 {
++	dr_mode = "peripheral";
++	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/qcom/nord.dtsi b/arch/arm64/boot/dts/qcom/nord.dtsi
+index 941d9aed5963..511d3a4d170d 100644
+--- a/arch/arm64/boot/dts/qcom/nord.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord.dtsi
+@@ -4,7 +4,13 @@
+  */
+ 
+ #include <dt-bindings/firmware/qcom,scm.h>
++#include <dt-bindings/clock/qcom,nord-negcc.h>
++#include <dt-bindings/clock/qcom,nord-tcsrcc.h>
++#include <dt-bindings/clock/qcom,rpmh.h>
++#include <dt-bindings/interconnect/qcom,icc.h>
++#include <dt-bindings/interconnect/qcom,nord-rpmh.h>
+ #include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/phy/phy-qcom-qmp.h>
+ #include <dt-bindings/mailbox/qcom-ipcc.h>
+ #include <dt-bindings/soc/qcom,gpr.h>
+ 
+-- 
+2.34.1
+

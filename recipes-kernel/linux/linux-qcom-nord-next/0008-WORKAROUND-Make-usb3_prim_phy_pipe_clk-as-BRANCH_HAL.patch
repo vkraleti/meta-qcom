@@ -1,0 +1,29 @@
+From e27c3de10ce3fddc96423646a16aedbcb189234e Mon Sep 17 00:00:00 2001
+From: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Date: Wed, 15 Jul 2026 18:51:52 +0530
+Subject: [PATCH] WORKAROUND: Make usb3_prim_phy_pipe_clk as BRANCH_HALT_SKIP
+
+Make usb3_prim_phy_pipe_clk as BRANCH_HALT_SKIP to let qmp phy init pass.
+
+Signed-off-by: Krishna Kurapati <krishna.kurapati@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/clk/qcom/negcc-nord.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/clk/qcom/negcc-nord.c b/drivers/clk/qcom/negcc-nord.c
+index 767cf1842891..9be31e7bcc0e 100644
+--- a/drivers/clk/qcom/negcc-nord.c
++++ b/drivers/clk/qcom/negcc-nord.c
+@@ -1626,7 +1626,7 @@ static struct clk_branch ne_gcc_usb3_prim_phy_com_aux_clk = {
+ 
+ static struct clk_branch ne_gcc_usb3_prim_phy_pipe_clk = {
+ 	.halt_reg = 0x2a074,
+-	.halt_check = BRANCH_HALT_VOTED,
++	.halt_check = BRANCH_HALT_SKIP,
+ 	.hwcg_reg = 0x2a074,
+ 	.hwcg_bit = 1,
+ 	.clkr = {
+-- 
+2.34.1
+
