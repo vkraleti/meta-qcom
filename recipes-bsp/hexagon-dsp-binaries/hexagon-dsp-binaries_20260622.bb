@@ -22,18 +22,29 @@ NO_GENERIC_LICENSE[dspso-WHENCE] = "WHENCE"
 
 SRC_URI = " \
     git://github.com/linux-msm/dsp-binaries;protocol=https;branch=trunk;tag=${PV} \
+    https://artifactory-las.qualcomm.com/artifactory/lint-lv-local/nord-test/nord-dsp-libs.zip;name=nord-dsp-libs;subdir=nord-dsp-libs-src \
 "
 
 SRCREV = "2ba83638b373c0a6bbb7ecb32f5e2b9dfca2c4ce"
+SRC_URI[nord-dsp-libs.sha256sum] = "649c39657bca17470c1f2dcffd669d286d4fff6e9280175d7d8fe3ec2ea6b890"
+
+# Nord IQ10-RRD DSP libs source directory (internal artifactory drop, no
+# upstream config.txt/WHENCE of its own)
+NORD_DSP_LIBS_DIR = "${UNPACKDIR}/nord-dsp-libs-src/nord-dsp-libs/Nord/Qualcomm/IQ10-RRD/NSP.AT.1.0-00601.2-NORD-1"
 
 inherit allarch
 
 INHIBIT_PACKAGE_DEBUG_SPLIT = "1"
+INHIBIT_SYSROOT_STRIP = "1"
 INHIBIT_PACKAGE_STRIP = "1"
 INHIBIT_DEFAULT_DEPS = "1"
 
 do_install () {
 	oe_runmake install 'DESTDIR=${D}'
+	for core in cdsp cdsp1 cdsp2 cdsp3; do
+		install -d ${D}${libdir}/dsp/${core}
+		install -Dm 0644 ${NORD_DSP_LIBS_DIR}/nord.${core}.prod/* ${D}${libdir}/dsp/${core}/
+	done
 }
 
 PACKAGES_DYNAMIC = "^${PN}-.*-config"
@@ -48,6 +59,10 @@ PACKAGE_BEFORE_PN =+ "\
     ${PN}-qcom-glymur-crd-cdsp \
     ${PN}-qcom-hamoa-iot-evk-adsp \
     ${PN}-qcom-hamoa-iot-evk-cdsp \
+    ${PN}-qcom-iq10-rrd-cdsp \
+    ${PN}-qcom-iq10-rrd-cdsp1 \
+    ${PN}-qcom-iq10-rrd-cdsp2 \
+    ${PN}-qcom-iq10-rrd-cdsp3 \
     ${PN}-qcom-iq8275-evk-adsp \
     ${PN}-qcom-iq8275-evk-cdsp \
     ${PN}-qcom-iq8275-evk-gdsp \
@@ -102,6 +117,10 @@ LICENSE:${PN}-qcom-glymur-crd-adsp = "dspso-qcom-2"
 LICENSE:${PN}-qcom-glymur-crd-cdsp = "dspso-qcom-2"
 LICENSE:${PN}-qcom-hamoa-iot-evk-adsp = "dspso-qcom-2"
 LICENSE:${PN}-qcom-hamoa-iot-evk-cdsp = "dspso-qcom-2"
+LICENSE:${PN}-qcom-iq10-rrd-cdsp = "dspso-qcom-2"
+LICENSE:${PN}-qcom-iq10-rrd-cdsp1 = "dspso-qcom-2"
+LICENSE:${PN}-qcom-iq10-rrd-cdsp2 = "dspso-qcom-2"
+LICENSE:${PN}-qcom-iq10-rrd-cdsp3 = "dspso-qcom-2"
 LICENSE:${PN}-qcom-iq8275-evk-adsp = "dspso-qcom-2"
 LICENSE:${PN}-qcom-iq8275-evk-cdsp = "dspso-qcom-2"
 LICENSE:${PN}-qcom-iq8275-evk-gdsp = "dspso-qcom-2"
@@ -201,10 +220,23 @@ python() {
         if not p.endswith('dsp'):
             continue
 
+        # iq10-rrd packages have no upstream config yaml, skip them
+        if 'iq10-rrd' in p:
+            continue
+
         cfg = (p[:-4] + 'config').replace('-qcom-', '-qualcomm-')
         if cfg not in (d.getVar('RDEPENDS:' + p) or "").split():
             d.prependVar('RDEPENDS:' + p, cfg + ' ')
 }
+
+# No conf.d/hexagon-dsp-binaries-qualcomm-iq10-rrd.yaml exists yet, so
+# override the auto-RDEPENDS hook above (it would otherwise add a
+# dependency on hexagon-dsp-binaries-qualcomm-iq10-rrd-config, which
+# will never exist as a real package).
+RDEPENDS:${PN}-qcom-iq10-rrd-cdsp = ""
+RDEPENDS:${PN}-qcom-iq10-rrd-cdsp1 = ""
+RDEPENDS:${PN}-qcom-iq10-rrd-cdsp2 = ""
+RDEPENDS:${PN}-qcom-iq10-rrd-cdsp3 = ""
 
 python populate_packages:prepend () {
     def fix_cfg_package(fn, pkg, file_regex, output_pattern, group):
@@ -233,6 +265,10 @@ FILES:${PN}-qcom-glymur-crd-adsp = "${datadir}/qcom/glymur/Qualcomm/Glymur-CRD/d
 FILES:${PN}-qcom-glymur-crd-cdsp = "${datadir}/qcom/glymur/Qualcomm/Glymur-CRD/dsp/cdsp*"
 FILES:${PN}-qcom-hamoa-iot-evk-adsp = "${datadir}/qcom/x1e80100/Qualcomm/Hamoa-IoT-EVK/dsp/adsp*"
 FILES:${PN}-qcom-hamoa-iot-evk-cdsp = "${datadir}/qcom/x1e80100/Qualcomm/Hamoa-IoT-EVK/dsp/cdsp*"
+FILES:${PN}-qcom-iq10-rrd-cdsp = "${libdir}/dsp/cdsp"
+FILES:${PN}-qcom-iq10-rrd-cdsp1 = "${libdir}/dsp/cdsp1"
+FILES:${PN}-qcom-iq10-rrd-cdsp2 = "${libdir}/dsp/cdsp2"
+FILES:${PN}-qcom-iq10-rrd-cdsp3 = "${libdir}/dsp/cdsp3"
 FILES:${PN}-qcom-iq8275-evk-adsp = "${datadir}/qcom/qcs8300/Qualcomm/IQ8275-EVK/dsp/adsp"
 FILES:${PN}-qcom-iq8275-evk-cdsp = "${datadir}/qcom/qcs8300/Qualcomm/IQ8275-EVK/dsp/cdsp*"
 FILES:${PN}-qcom-iq8275-evk-gdsp = "${datadir}/qcom/qcs8300/Qualcomm/IQ8275-EVK/dsp/gdsp*"
@@ -281,6 +317,10 @@ INSANE_SKIP:${PN}-qcom-glymur-crd-adsp = "arch libdir file-rdeps textrel"
 INSANE_SKIP:${PN}-qcom-glymur-crd-cdsp = "arch libdir file-rdeps textrel"
 INSANE_SKIP:${PN}-qcom-hamoa-iot-evk-adsp = "arch libdir file-rdeps textrel"
 INSANE_SKIP:${PN}-qcom-hamoa-iot-evk-cdsp = "arch libdir file-rdeps textrel"
+INSANE_SKIP:${PN}-qcom-iq10-rrd-cdsp = "arch libdir file-rdeps textrel already-stripped"
+INSANE_SKIP:${PN}-qcom-iq10-rrd-cdsp1 = "arch libdir file-rdeps textrel already-stripped"
+INSANE_SKIP:${PN}-qcom-iq10-rrd-cdsp2 = "arch libdir file-rdeps textrel already-stripped"
+INSANE_SKIP:${PN}-qcom-iq10-rrd-cdsp3 = "arch libdir file-rdeps textrel already-stripped"
 INSANE_SKIP:${PN}-qcom-kaanapali-mtp-adsp = "arch libdir file-rdeps textrel"
 INSANE_SKIP:${PN}-qcom-kaanapali-mtp-cdsp = "arch libdir file-rdeps textrel"
 INSANE_SKIP:${PN}-qcom-qcs615-ride-adsp = "arch libdir file-rdeps textrel"
@@ -313,6 +353,10 @@ SKIP_FILEDEPS:${PN}-qcom-glymur-crd-adsp = "1"
 SKIP_FILEDEPS:${PN}-qcom-glymur-crd-cdsp = "1"
 SKIP_FILEDEPS:${PN}-qcom-hamoa-iot-evk-adsp = "1"
 SKIP_FILEDEPS:${PN}-qcom-hamoa-iot-evk-cdsp = "1"
+SKIP_FILEDEPS:${PN}-qcom-iq10-rrd-cdsp = "1"
+SKIP_FILEDEPS:${PN}-qcom-iq10-rrd-cdsp1 = "1"
+SKIP_FILEDEPS:${PN}-qcom-iq10-rrd-cdsp2 = "1"
+SKIP_FILEDEPS:${PN}-qcom-iq10-rrd-cdsp3 = "1"
 SKIP_FILEDEPS:${PN}-qcom-kaanapali-mtp-adsp = "1"
 SKIP_FILEDEPS:${PN}-qcom-kaanapali-mtp-cdsp = "1"
 SKIP_FILEDEPS:${PN}-qcom-qcs8300-ride-adsp = "1"

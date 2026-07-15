@@ -11,8 +11,9 @@ RRECOMMENDS:${PN}-firmware = " \
     linux-firmware-qcom-nord \
 "
 
-# TODO: confirm hexagon DSP binaries recipes exist under this name for iq10-rrd
-# RDEPENDS:${PN}-hexagon-dsp-binaries = " \
-#    hexagon-dsp-binaries-qcom-iq10-rrd-adsp \
-#    hexagon-dsp-binaries-qcom-iq10-rrd-cdsp \
-# "
+RDEPENDS:${PN}-hexagon-dsp-binaries = " \
+    hexagon-dsp-binaries-qcom-iq10-rrd-cdsp \
+    hexagon-dsp-binaries-qcom-iq10-rrd-cdsp1 \
+    hexagon-dsp-binaries-qcom-iq10-rrd-cdsp2 \
+    hexagon-dsp-binaries-qcom-iq10-rrd-cdsp3 \
+"

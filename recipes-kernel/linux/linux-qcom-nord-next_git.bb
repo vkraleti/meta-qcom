@@ -38,6 +38,7 @@ SRC_URI += " \
     file://0005-arm64-dts-qcom-Add-changes-to-enable-primary-USB-con.patch \
     file://0006-remove-addressing-and-add-status-enbaled-in-actual-n.patch \
     file://0007-move-usb-node-from-under-ufshc-to-soc.patch \
+    file://0008-WORKAROUND-Make-usb3_prim_phy_pipe_clk-as-BRANCH_HAL.patch \
 "
 
 S = "${UNPACKDIR}/${BP}"
