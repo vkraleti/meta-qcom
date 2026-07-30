@@ -1,4 +1,4 @@
-From cd7e8affaef62340405a6e477ffa4c4b96e3e6c5 Mon Sep 17 00:00:00 2001
+From e80fa15c0bfe018687ea7b95c54db907e094830e Mon Sep 17 00:00:00 2001
 From: Viswanath Kraleti <viswanath.kraleti@oss.qualcomm.com>
 Date: Fri, 10 Jul 2026 18:51:29 +0530
 Subject: [PATCH] Add Nord support
@@ -10,11 +10,11 @@ Upstream-Status: Pending
  1 file changed, 8 insertions(+)
 
 diff --git a/qcom-metadata.dts b/qcom-metadata.dts
-index 17b5028..878663a 100644
+index 333464a..87a9727 100644
 --- a/qcom-metadata.dts
 +++ b/qcom-metadata.dts
-@@ -24,10 +24,18 @@
- 			msm-id = <0x00000294>;
+@@ -28,10 +28,18 @@
+ 			msm-id = <0x000002b5>;
  		};
  
 +		nord {
@@ -32,6 +32,3 @@ index 17b5028..878663a 100644
  		qcm6490 {
  			msm-id = <0x000001f1>;
  		};
--- 
-2.34.1
-
