@@ -8,6 +8,7 @@ COMPATIBLE_MACHINE:aarch64 = "(qcom)"
 PV = "2026.07+git"
 
 SRCREV = "e35d929347b19b66db87995724f0fd94be057ff4"
+SRCREV:nord = "bf3e21a0953f21ec78782ba409bf2cf2ada3cd5d"
 SRCBRANCH = "nobranch=1"
 
 SRC_URI = "git://github.com/qualcomm-linux/u-boot.git;${SRCBRANCH};protocol=https;name=uboot"
