@@ -8,6 +8,7 @@ PACKAGES = " \
 "
 
 RRECOMMENDS:${PN}-firmware = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'wifi', 'linux-firmware-ath12k-wcn7850', '', d)} \
     linux-firmware-qcom-nord \
 "
 
