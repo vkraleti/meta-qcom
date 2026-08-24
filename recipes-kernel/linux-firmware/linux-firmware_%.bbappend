@@ -18,9 +18,9 @@ ALTERNATIVE_LINK_NAME[ar6004-hw13-bdata] = "${nonarch_base_libdir}/firmware/ath6
 
 # Temporary Nord Bringup changes
 SRC_URI:append:nord = " \
-    https://artifactory-las.qualcomm.com/artifactory/lint-lv-local/nord-test/NORD_fw.zip;name=nordfw \
+    https://artifactory-las.qualcomm.com/artifactory/lint-lv-local/firmware-artifacts/linux-firmware-nord-20260821.zip;name=nordfw \
 "
-SRC_URI[nordfw.sha256sum] = "a4abe380596d61181288c519e0ae298c592503cf0e12cf63401ed822da547b3d"
+SRC_URI[nordfw.sha256sum] = "13a0bd0ec5eb6cb8ddca0d5d0b009ee19637f776242c02bc82821076c772d977"
 
 do_install:append:nord() {
     # firmware
@@ -44,6 +44,7 @@ FILES:${PN}-qcom-nord = " \
     ${firmwaredir}/qca/gn* \
     ${firmwaredir}/qca/hmt* \
     ${firmwaredir}/qcom/nord/* \
+    ${firmwaredir}/qcom/sa8797p/* \
     ${datadir}/qcom/sa8797p/* \
 "
 SKIP_FILEDEPS:${PN}-qcom-nord = "1"
