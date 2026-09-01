@@ -10,6 +10,10 @@ SRCREV_optee = "5fde2c5c6ca7992d01dac3f012f8b6304bce2376"
 SRC_TAG:shikra = "tag=early-hwe-shikra-4.10-20261015"
 SRCREV_optee:shikra = "ff5f3dced71ba8d9ff9d99a00ba4e2e08654b309"
 
+# Nord Bringup specific
+SRC_URI:nord = "git://github.com/qualcomm-linux/optee_os.git;protocol=https;name=optee-nord;branch=early/hwe/nord"
+SRCREV_optee-nord = "bfc3b226d1eb9c90af51f416b1b9beba7781e3d4"
+
 # Copy of do_deploy from meta-arm until we get it fixed to support configurable deploy dir
 OPTEE_DEPLOY ?= "optee"
 do_deploy() {
