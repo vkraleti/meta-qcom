@@ -18,18 +18,18 @@ KERNEL_PAHOLE ?= '${@oe.utils.vartrue("DEBUG_BUILD", bb.utils.contains("BBFILE_C
 do_configure[depends] += '${@oe.utils.vartrue("KERNEL_PAHOLE", "pahole-native:do_populate_sysroot", "", d)}'
 EXTRA_OEMAKE += '${@oe.utils.vartrue("KERNEL_PAHOLE", "", "PAHOLE=false", d)}'
 
-# tag: qcom-next-7.2-20260826
+# tag: qcom-next-7.2-20260902
 SRCREV ?= "d49c33864d06e9672dce57738be8851384578fcf"
 
 SRCBRANCH ?= "nobranch=1"
 SRCBRANCH:class-devupstream ?= "branch=qcom-next"
 
 # For Nord, switch to temp enablement branch
-LINUX_VERSION:nord = "7.1+7.2-rc3-20260826+nord"
+LINUX_VERSION:nord = "7.1+7.2-rc3-20260902+nord"
 SRCBRANCH:nord = "branch=staging/nord"
 
-# tag: nord-staging-qcom-next-7.2-rc3-20260826
-SRCREV:nord = "5e135c4f50fa80d00226bfc0c39e8f823f0c6b3c"
+# tag: nord-staging-qcom-next-7.2-rc3-20260902
+SRCREV:nord = "4ee8d36976563786de92b67e51005f858ed32eb5"
 
 SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=https"
 
