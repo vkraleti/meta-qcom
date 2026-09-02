@@ -8,6 +8,12 @@ SRC_TAG = "tag=qcom-next-2.15-20260804"
 SRC_URI = "git://github.com/qualcomm-linux/trusted-firmware-a.git;protocol=https;name=tfa;nobranch=1;${SRC_TAG}"
 SRCREV_tfa = "10ecf7dcc641e8453e2e2ea2f21c13c7a867ffe0"
 
+# Nord Bringup specific
+PV:nord = "2.15.0-qcom-nord-20260902+git"
+SRC_URI:nord = "git://github.com/bhn-qcom/staging_tfa_iq10.git;protocol=https;name=tfa-nord;nobranch=1"
+SRCREV_tfa-nord = "5d74d9711506216d78006bc2834a9f2684dba391"
+TFA_BUILD_TARGET:nord = "bl31 fip"
+
 LIC_FILES_CHKSUM += "file://docs/license.rst;md5=6ed7bace7b0bc63021c6eba7b524039e"
 
 COMPATIBLE_MACHINE = "^$"
