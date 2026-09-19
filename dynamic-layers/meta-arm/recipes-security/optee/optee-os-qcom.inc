@@ -7,9 +7,9 @@ SRC_URI = "git://github.com/qualcomm-linux/optee_os.git;protocol=https;name=opte
 SRCREV_optee = "690842e042dc470bf0625eb77a8cab926c372a8f"
 
 # Nord Bringup specific
-PV:nord = "4.10.0-qcom-nord-20260902+git"
+PV:nord = "4.10.0-qcom-nord-20260919+git"
 SRC_URI:nord = "git://github.com/basantku/staging-optee_os.git;protocol=https;name=optee-nord;nobranch=1"
-SRCREV_optee-nord = "d90e01ac4164e7535965c48aa8d042719ad7e655"
+SRCREV_optee-nord = "4bc075cced4c9bc0f588acf625eca2dfd951f28f"
 
 # Copy of do_deploy from meta-arm until we get it fixed to support configurable deploy dir
 OPTEE_DEPLOY ?= "optee"
