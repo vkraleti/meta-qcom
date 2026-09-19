@@ -7,6 +7,7 @@ BOOTBINARIES = "QCM6490_bootbinaries"
 
 SRC_URI = " \
     https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES}_${PV}.zip;name=bootbinaries \
+    https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES_IMMUTABLE}_${PV}.zip;name=bootbinaries-immutable \
     "
 
 QCOM_BOOT_IMG_SUBDIR = "qcm6490"

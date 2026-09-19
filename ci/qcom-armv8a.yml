@@ -5,4 +5,9 @@ header:
   includes:
   - ci/base.yml
 
+local_conf_header:
+  external_devicetree: |
+    PREFERRED_PROVIDER_virtual/dtb = "devicetree-dummy"
+    QCOM_BOOTIMG_DEVICETREE = "qcom-armv8-dummy.dtb"
+
 machine: qcom-armv8a

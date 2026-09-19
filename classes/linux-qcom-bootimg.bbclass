@@ -20,6 +20,11 @@ QIMG_DEPLOYDIR = "${WORKDIR}/qcom_deploy-${PN}"
 python __anonymous () {
     if d.getVar('INITRAMFS_IMAGE') != '':
         d.appendVarFlag('do_qcom_img_deploy', 'depends', ' ${INITRAMFS_IMAGE}:do_image_complete')
+
+    providerdtb = d.getVar("PREFERRED_PROVIDER_virtual/dtb")
+    if providerdtb:
+        d.appendVarFlag('do_qcom_img_deploy', 'depends', ' virtual/dtb:do_populate_sysroot')
+        d.setVar('EXTERNAL_KERNEL_DEVICETREE', "${RECIPE_SYSROOT}/boot/devicetree")
 }
 
 python do_qcom_img_deploy() {
@@ -48,6 +53,7 @@ python do_qcom_img_deploy() {
     workdir = d.getVar("WORKDIR")
     kernel = os.path.join(workdir, "kernel-dtb")
     definitrd = os.path.join(workdir, "initrd.img")
+    external_dtbdir = d.getVar("EXTERNAL_KERNEL_DEVICETREE")
     mkbootimg = os.path.join(d.getVar("STAGING_BINDIR_NATIVE"), "skales", "mkbootimg")
     kernel_image_name = d.getVar("KERNEL_IMAGE_NAME")
     kernel_link_name = d.getVar("KERNEL_IMAGE_LINK_NAME")
@@ -75,7 +81,7 @@ python do_qcom_img_deploy() {
     with open(definitrd, "w") as f:
         f.write("This is not an initrd\n")
 
-    for dtbf in d.getVar("KERNEL_DEVICETREE").split():
+    def make_dtb_image(dtbf, external=False):
         dtb = os.path.basename(dtbf)
         dtb_name = dtb.rsplit('.', 1)[0]
 
@@ -115,31 +121,50 @@ python do_qcom_img_deploy() {
         consoles = ' '.join(map(lambda c: "console=%(tty)s,%(rate)sn8" % dict(zip(("rate", "tty"), c.split(';'))), getVarDTB("SERIAL_CONSOLES").split()))
 
         # prepare kernel image with appended dtb
+        dtbdir = external_dtbdir if external else image_dir
         with open(kernel, 'wb') as wfd:
             with open(kernel_src, 'rb') as rfd:
                 shutil.copyfileobj(rfd, wfd)
-            with open(os.path.join(image_dir, dtb), 'rb') as rfd:
+            with open(os.path.join(dtbdir, dtb), 'rb') as rfd:
                 shutil.copyfileobj(rfd, wfd)
 
         rootfs = getVarDTB("QCOM_BOOTIMG_ROOTFS")
         if rootfs is None:
             bb.fatal("QCOM_BOOTIMG_ROOTFS is undefined")
 
-        output = make_image("boot-%s-%s.img", rootfs)
+        template = "boot-%s-%s-ext-dtb.img" if external else "boot-%s-%s.img"
+        output = make_image(template, rootfs)
         if not os.path.exists(output_img):
             os.symlink(os.path.basename(output), output_img)
 
         if initrd:
-            make_initramfs_image("boot-%s-%s-%s.img", rootfs, initrd, d.getVar("INITRAMFS_IMAGE"))
+            template = "boot-%s-%s-%s-ext-dtb.img" if external else "boot-%s-%s-%s.img"
+            make_initramfs_image(template, rootfs, initrd, d.getVar("INITRAMFS_IMAGE"))
 
         sd_rootfs = getVarDTB("SD_QCOM_BOOTIMG_ROOTFS")
         if sd_rootfs:
-            output = make_image("boot-sd-%s-%s.img", sd_rootfs)
+            template = "boot-sd-%s-%s-ext-dtb.img" if external else "boot-sd-%s-%s.img"
+            output = make_image(template, sd_rootfs)
             if not os.path.exists(output_sd_img):
                 os.symlink(os.path.basename(output), output_sd_img)
 
             if initrd:
-                make_initramfs_image("boot-sd-%s-%s-%s.img", rootfs, initrd, d.getVar("INITRAMFS_IMAGE"))
+                template = "boot-sd-%s-%s-%s-ext-dtb.img" if external else "boot-sd-%s-%s-%s.img"
+                make_initramfs_image(template, rootfs, initrd, d.getVar("INITRAMFS_IMAGE"))
+
+    if not d.getVar("QCOM_BOOTIMG_DEVICETREE") and not d.getVar("KERNEL_DEVICETREE"):
+        bb.fatal("Either QCOM_BOOTIMG_DEVICETREE or KERNEL_DEVICETREE needed for linux-qcom-bootimg.bbclass")
+
+    if d.getVar("KERNEL_DEVICETREE"):
+        for dtbf in d.getVar("KERNEL_DEVICETREE").split():
+            make_dtb_image(dtbf)
+
+    if d.getVar("QCOM_BOOTIMG_DEVICETREE") and not external_dtbdir:
+        bb.fatal("QCOM_BOOTIMG_DEVICETREE requires PREFERRED_PROVIDER_virtual/dtb to be set")
+
+    if d.getVar("QCOM_BOOTIMG_DEVICETREE"):
+        for dtbf in d.getVar("QCOM_BOOTIMG_DEVICETREE").split():
+            make_dtb_image(dtbf, external=True)
 }
 
 do_qcom_img_deploy[depends] += "skales-native:do_populate_sysroot"

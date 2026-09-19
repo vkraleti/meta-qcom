@@ -7,10 +7,9 @@ include firmware-qcom-boot-common.inc
 FW_ARTIFACTORY = "softwarecenter.qualcomm.com/nexus/generic/product/chip/tech-package/Hamoa_bootbinaries.1.0/hamoa_bootbinaries.1.0-test-device-public/"
 BOOTBINARIES = "HAMOA_bootbinaries"
 
-S = "${UNPACKDIR}/${BOOTBINARIES}/spinor"
-
 SRC_URI = " \
     https://${FW_ARTIFACTORY}/${PV}/HAMOA_bootbinaries_${PV}.zip;name=bootbinaries \
+    https://${FW_ARTIFACTORY}/${PV}/HAMOA_bootbinaries_immutable_${PV}.zip;name=bootbinaries-immutable \
     https://${FW_ARTIFACTORY}/${PV}/LICENSE.txt;downloadfilename=LICENSE.${BPN};name=license \
     "
 SRC_URI[license.sha256sum] = "3ad8f1fd82f2918c858cec2d0887b7df6f71a06416beecfdb3efe7d62874d863"

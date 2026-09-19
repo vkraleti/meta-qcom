@@ -29,7 +29,7 @@ env:
   CACHE_DIR: /efsx/qli/meta-qcom
   KAS_CLONE_DEPTH: 1
   KAS_CONTAINER: ${{ github.workspace }}/kas-container
-  KAS_CONTAINER_IMAGE: ghcr.io/siemens/kas/kas:5.5
+  KAS_CONTAINER_IMAGE: ghcr.io/siemens/kas/kas@sha256:3f3d3257e8d4ca3adfcb2e0025e6da24339fb8d68a6999ca36c37381351582d5 # 5.5-9-g0555188
 
 jobs:
   kas-setup:
@@ -256,10 +256,10 @@ jobs:
           - name: qcom-distro-catchall
             yamlfile: ':ci/qcom-distro-catchall.yml'
           - name: debug
-            yamlfile: ':ci/qcom-distro-catchall.yml:ci/debug.yml'
-            profile: full
+            yamlfile: ':ci/qcom-distro-catchall.yml:ci/debug.yml:ci/nospdx.yml'
+            profile: weekly
           - name: performance
-            yamlfile: ':ci/qcom-distro-catchall.yml:ci/performance.yml'
+            yamlfile: ':ci/qcom-distro-catchall.yml:ci/performance.yml:ci/nospdx.yml'
             profile: full
         kernel:
           - type: default
@@ -279,6 +279,14 @@ jobs:
                 type: rt-6.18-distro-kvm
           - distro:
                 name: qcom-distro-catchall
+            kernel:
+                type: rt-6.18-distro-kvm
+          - distro:
+                name: debug
+            kernel:
+                type: rt-6.18-distro-kvm
+          - distro:
+                name: performance
             kernel:
                 type: rt-6.18-distro-kvm
           # Exclude jobs from compile_warm_up
@@ -342,14 +350,6 @@ jobs:
             distro:
                 name: qcom-distro-dpdk
                 yamlfile: ':ci/qcom-distro.yml:ci/dpdk.yml'
-            kernel:
-                type: default
-                dirname: ""
-                yamlfile: ""
-          - machine: rb3gen2-core-kit
-            distro:
-                name: qcom-distro-kvm
-                yamlfile: ':ci/qcom-distro-kvm.yml'
             kernel:
                 type: default
                 dirname: ""
@@ -420,8 +420,8 @@ jobs:
                 yamlfile: ":ci/linux-qcom-6.18.yml:ci/u-boot-qcom.yml"
           - machine: rb3gen2-core-kit-open-fw
             distro:
-                name: qcom-distro-kvm
-                yamlfile: ':ci/qcom-distro-kvm.yml'
+                name: qcom-distro
+                yamlfile: ':ci/qcom-distro.yml'
             kernel:
                 type: default
                 dirname: ""
@@ -434,6 +434,14 @@ jobs:
                 type: default
                 dirname: ""
                 yamlfile: ""
+          - machine: iq-9075-evk-open-fw-spl
+            distro:
+                name: qcom-distro-kvm
+                yamlfile: ':ci/qcom-distro-kvm.yml'
+            kernel:
+                type: kernel-fit
+                dirname: "_kernel-fit"
+                yamlfile: ":ci/kernel-fit-image.yml"
           - machine: rb3gen2-core-kit
             distro:
                 name: nodistro
