@@ -16,7 +16,7 @@ PV = "2026.07+2026.10-rc1+git"
 
 # tag: qcom-next-v2026.10-rc1-20260915
 SRCREV = "5ec66cb5c3f29e2da1f55464109cae3fe8545b69"
-SRCREV:nord = "6f3e6e97fe820d6c97620bc4f1f62f088b4ed9f6"
+SRCREV:nord = "e4d42e0cb2e595b66aa00e55dee49c1ad1701ad3"
 SRCBRANCH = "nobranch=1"
 
 SRC_URI = "git://github.com/qualcomm-linux/u-boot.git;${SRCBRANCH};protocol=https;name=uboot"
