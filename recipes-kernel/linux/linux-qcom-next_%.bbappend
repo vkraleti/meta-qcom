@@ -8,3 +8,5 @@
 # tag: qcom-next-7.3-rc2-20260921
 LINUX_VERSION:nord = "7.2+7.3-rc2+nord"
 SRCREV:nord = "8f69c5810aa30bfa58bf58256fed38e666b231c2"
+
+SRC_URI:append:nord = " file://0001-clk-qcom-gcc-Fix-GPLL-enable-register-offset-for-Nor.patch"
