@@ -19,7 +19,7 @@ UBOOT_CONFIG[qcs6490-rb3gen2] = "qcm6490_defconfig"
 UBOOT_CONFIG[qrb2210-rb1] = "qcom_defconfig"
 UBOOT_CONFIG[sdm845-db845c] = "qcom_defconfig"
 UBOOT_CONFIG[shikra-evk] = "qcom_shikra_defconfig"
-UBOOT_CONFIG[nord] = "qcom_nord_defconfig"
+UBOOT_CONFIG[nord] = "qcom_nord_ride_spl_defconfig"
 
 BOARD_MBN_HEADER[iq-615-evk] = "v6"
 BOARD_MBN_HEADER[iq-8275-evk] = "v6"
