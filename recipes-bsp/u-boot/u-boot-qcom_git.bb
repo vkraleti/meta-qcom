@@ -69,6 +69,11 @@ uboot_assemble_fitimage_helper:append() {
         qtestsign -${mbn_header} tz -o u-boot-spl.mbn u-boot-spl-swiv.elf
         rm -f u-boot-spl-swiv.elf
     fi
+
+    #tmp hack for spl signing
+    mbn_header=$(uboot_config_get_indexed_value "${BOARD_MBN_HEADER}" $i)
+    export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
+    qtestsign -${mbn_header} tz -o u-boot-spl.mbn spl/u-boot-spl.wrap-elf
 }
 
 uboot_deploy_config:append() {
@@ -79,4 +84,5 @@ uboot_deploy_config:append() {
     elif [ -f ${B}/${builddir}/u-boot.mbn ]; then
         install -m 0644 ${B}/${builddir}/u-boot.mbn ${DEPLOYDIR}/u-boot-${type}.mbn
     fi
+    install -m 0644 ${B}/${builddir}/u-boot-spl.mbn ${DEPLOYDIR}/u-boot-spl.mbn
 }
