@@ -1,0 +1,3039 @@
+From f1eb34ae06143f9c74912bdae4594951050bbef3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E2=80=9CDeepak?= <kudee@qti.qualcomm.com>
+Date: Tue, 8 Sep 2026 15:09:42 +0530
+Subject: [PATCH 1/3] plat-qcom: nord: enable HPASS0-2/NSPSS0-3 PAS support
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add Nord PAS platform support for the HPASS0-2 and NSPSS0-3 remote processors.
+Register the NSPSS and HPASS subsystem  with their PAS IDs, base addresses,
+clock groups, reset sequencing and enable them for fw_start operations.
+
+Signed-off-by: “Deepak <kudee@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ .../arch/arm/plat-qcom/wildcat/nord/target.mk |   9 +-
+ core/pta/qcom/pas/platform/nord/hpass.c       | 161 +++++++
+ .../pas/platform/nord/{hpass2.h => hpass.h}   |   8 +-
+ core/pta/qcom/pas/platform/nord/hpass0.c      | 336 ---------------
+ core/pta/qcom/pas/platform/nord/hpass0.h      |  13 -
+ core/pta/qcom/pas/platform/nord/hpass1.c      | 314 --------------
+ core/pta/qcom/pas/platform/nord/hpass1.h      |  13 -
+ core/pta/qcom/pas/platform/nord/hpass2.c      | 315 --------------
+ core/pta/qcom/pas/platform/nord/nspss.c       | 143 +++++++
+ .../pas/platform/nord/{nspss1.h => nspss.h}   |   9 +-
+ core/pta/qcom/pas/platform/nord/nspss0.c      | 398 ------------------
+ core/pta/qcom/pas/platform/nord/nspss0.h      |  13 -
+ core/pta/qcom/pas/platform/nord/nspss1.c      | 356 ----------------
+ core/pta/qcom/pas/platform/nord/nspss2.c      | 352 ----------------
+ core/pta/qcom/pas/platform/nord/nspss2.h      |  13 -
+ core/pta/qcom/pas/platform/nord/nspss3.c      | 352 ----------------
+ core/pta/qcom/pas/platform/nord/nspss3.h      |  13 -
+ core/pta/qcom/pas/platform/nord/sub.mk        |   2 +-
+ core/pta/qcom/pas/platform/nord/subsys.c      |   9 +-
+ 19 files changed, 324 insertions(+), 2505 deletions(-)
+ create mode 100644 core/pta/qcom/pas/platform/nord/hpass.c
+ rename core/pta/qcom/pas/platform/nord/{hpass2.h => hpass.h} (57%)
+ delete mode 100644 core/pta/qcom/pas/platform/nord/hpass0.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/hpass0.h
+ delete mode 100644 core/pta/qcom/pas/platform/nord/hpass1.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/hpass1.h
+ delete mode 100644 core/pta/qcom/pas/platform/nord/hpass2.c
+ create mode 100644 core/pta/qcom/pas/platform/nord/nspss.c
+ rename core/pta/qcom/pas/platform/nord/{nspss1.h => nspss.h} (50%)
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss0.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss0.h
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss1.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss2.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss2.h
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss3.c
+ delete mode 100644 core/pta/qcom/pas/platform/nord/nspss3.h
+
+diff --git a/core/arch/arm/plat-qcom/wildcat/nord/target.mk b/core/arch/arm/plat-qcom/wildcat/nord/target.mk
+index 735f4f894..7739e8a29 100644
+--- a/core/arch/arm/plat-qcom/wildcat/nord/target.mk
++++ b/core/arch/arm/plat-qcom/wildcat/nord/target.mk
+@@ -1,5 +1,8 @@
+ # Nord (SA8797P / Oryon) OP-TEE platform.
+ 
++CFG_DRIVERS_CLK ?= y
++CFG_DRIVERS_QCOM_CLK ?= y
++
+ # Threads are expensive in OP-TEE, so they don't have
+ # to be same as number of cores.
+ $(call force,CFG_TEE_CORE_NB_CORE,18)
+@@ -12,9 +15,6 @@ CFG_TZDRAM_START ?= 0xBC600000
+ CFG_TEE_RAM_VA_SIZE ?= 0x00200000
+ CFG_TA_RAM_VA_SIZE ?= 0x07800000
+ 
+-CFG_DRIVERS_CLK ?= y
+-CFG_DRIVERS_QCOM_CLK ?= y
+-
+ # QUPv3 serial-engine (bus) clock set-rate/DFS walker, consumed on-demand by a
+ # future TEE-side SPI/I2C driver. Set-rate votes CX/MX via RPMh, so pull
+ # cmd_db/RPMh client in whenever the walker is built.
+@@ -41,3 +41,6 @@ CFG_PAS_MD_SLOTS ?= 8
+ CFG_RESERVED_VASPACE_SIZE ?= (64 * 1024 * 1024)
+ CFG_IN_TREE_EARLY_TAS += qcom_pas/cff7d191-7ca0-4784-af13-48223b9a4fbe
+ endif
++CFG_TA_RAM_VA_SIZE ?= 0x07B80000
++
++CFG_QCOM_PAS_PTA ?= y
+diff --git a/core/pta/qcom/pas/platform/nord/hpass.c b/core/pta/qcom/pas/platform/nord/hpass.c
+new file mode 100644
+index 000000000..5902e8eb6
+--- /dev/null
++++ b/core/pta/qcom/pas/platform/nord/hpass.c
+@@ -0,0 +1,161 @@
++// SPDX-License-Identifier: BSD-2-Clause
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#include <io.h>
++#include <platform_config.h>
++#include <resource_table.h>
++#include <stdint.h>
++#include <string.h>
++
++#include "hpass.h"
++
++/*
++ * QDSP6 boot registers for each HPS instance. The PUB block
++ * holds the reset/boot FSM registers; the TCSR block holds the EVB select.
++ */
++#define HPASS_TCSR_REGS_REG_OFFSET		(0x1580000)
++
++#define HPASS_QDSP6SS_RST_EVB			(0x10)
++
++#define HPASS_TCSR_EVB_SEL_OFFSET		(0x3000)
++#define HPASS_TCSR_EVB_SEL_STRIDE		(0x1000)
++
++#define BOOT_FSM_TIMEOUT			(10000)
++
++#define HPASS0_BASE_OFFSET			(0xC00000)
++#define HPASS1_BASE_OFFSET			(0x2000000)
++#define HPASS2_BASE_OFFSET			(0x2100000)
++
++#define HPASS0_IDX				(0)
++#define HPASS1_IDX				(1)
++#define HPASS2_IDX				(2)
++
++/* Per-instance resource tables; blank placeholders, filled in later per-instance */
++static const struct fw_rsc_devmem hpass0_mem_res[] = { };
++static const struct fw_rsc_devmem hpass1_mem_res[] = { };
++static const struct fw_rsc_devmem hpass2_mem_res[] = { };
++
++DEFINE_RESOURCE_TABLE(HPASS0, ARRAY_SIZE(hpass0_mem_res));
++DEFINE_RESOURCE_TABLE(HPASS1, ARRAY_SIZE(hpass1_mem_res));
++DEFINE_RESOURCE_TABLE(HPASS2, ARRAY_SIZE(hpass2_mem_res));
++
++/*
++ * Shared boot routine. base_offset/idx reproduce each instance's former
++ * HPASS_EFUSE_Q6SS_EVB_SEL macro exactly, now passed in as call-site
++ * constants instead of being duplicated per file.
++ */
++static TEE_Result hpass_fw_start(struct qcom_pas_data *data,
++				 uint32_t base_offset, uint32_t idx)
++{
++	vaddr_t base = io_pa_or_va(&data->base, data->size);
++	uint32_t evb_sel = HPASS_TCSR_REGS_REG_OFFSET - base_offset +
++			   HPASS_TCSR_EVB_SEL_OFFSET +
++			   HPASS_TCSR_EVB_SEL_STRIDE * idx;
++
++	if (!base)
++		return TEE_ERROR_GENERIC;
++
++	/*
++	 * Program the firmware entry address and select the programmed EVB;
++	 * the Q6 PLL and core RCG are already configured by hpass_setup().
++	 */
++	io_write32(base + HPASS_QDSP6SS_RST_EVB, data->fw_base >> 4);
++	io_write32(base + evb_sel, 0);
++	dsb();
++
++	return TEE_SUCCESS;
++}
++
++static TEE_Result hpass0_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_fw_start(data, HPASS0_BASE_OFFSET, HPASS0_IDX);
++}
++
++static TEE_Result hpass1_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_fw_start(data, HPASS1_BASE_OFFSET, HPASS1_IDX);
++}
++
++static TEE_Result hpass2_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_fw_start(data, HPASS2_BASE_OFFSET, HPASS2_IDX);
++}
++
++static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data __unused)
++{
++	return TEE_ERROR_NOT_IMPLEMENTED;
++}
++
++static TEE_Result hpass0_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = HPASS0_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS0)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   hpass0_mem_res,
++			   HPASS0_RESOURCE_TABLE_HEADER_SIZE,
++			   HPASS0_RESOURCE_TABLE_SIZE);
++}
++
++static TEE_Result hpass1_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = HPASS1_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS1)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   hpass1_mem_res,
++			   HPASS1_RESOURCE_TABLE_HEADER_SIZE,
++			   HPASS1_RESOURCE_TABLE_SIZE);
++}
++
++static TEE_Result hpass2_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = HPASS2_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS2)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   hpass2_mem_res,
++			   HPASS2_RESOURCE_TABLE_HEADER_SIZE,
++			   HPASS2_RESOURCE_TABLE_SIZE);
++}
++
++const struct qcom_pas_ops hpass0_ops = {
++	.fw_start = hpass0_fw_start,
++	.fw_shutdown = hpass_fw_shutdown,
++	.get_resource_table = hpass0_get_resource_table,
++};
++
++const struct qcom_pas_ops hpass1_ops = {
++	.fw_start = hpass1_fw_start,
++	.fw_shutdown = hpass_fw_shutdown,
++	.get_resource_table = hpass1_get_resource_table,
++};
++
++const struct qcom_pas_ops hpass2_ops = {
++	.fw_start = hpass2_fw_start,
++	.fw_shutdown = hpass_fw_shutdown,
++	.get_resource_table = hpass2_get_resource_table,
++};
+diff --git a/core/pta/qcom/pas/platform/nord/hpass2.h b/core/pta/qcom/pas/platform/nord/hpass.h
+similarity index 57%
+rename from core/pta/qcom/pas/platform/nord/hpass2.h
+rename to core/pta/qcom/pas/platform/nord/hpass.h
+index b82a0efce..529522455 100644
+--- a/core/pta/qcom/pas/platform/nord/hpass2.h
++++ b/core/pta/qcom/pas/platform/nord/hpass.h
+@@ -3,11 +3,13 @@
+  * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ 
+-#ifndef _HPASS2_H_
+-#define _HPASS2_H_
++#ifndef _HPASS_H_
++#define _HPASS_H_
+ 
+ #include "pas_subsys.h"
+ 
++extern const struct qcom_pas_ops hpass0_ops;
++extern const struct qcom_pas_ops hpass1_ops;
+ extern const struct qcom_pas_ops hpass2_ops;
+ 
+-#endif /* _HPASS2_H_ */
++#endif /* _HPASS_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/hpass0.c b/core/pta/qcom/pas/platform/nord/hpass0.c
+deleted file mode 100644
+index 7991e18e2..000000000
+--- a/core/pta/qcom/pas/platform/nord/hpass0.c
++++ /dev/null
+@@ -1,336 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-
+-#include "hpass0.h"
+-
+-/*
+- * QDSP6 boot registers for each HPS instance. The PUB block
+- * holds the reset/boot FSM registers; the TCSR block holds the EVB select. 
+- */
+-#define HPASS_BASE_OFFSET				(0xC00000)
+-#define HPASS_TCSR_REGS_REG_OFFSET		(0x1580000)
+-
+-#define HPASS_QDSP6SS_RST_EVB			(0x10)
+-
+-#define HPASS_TCSR_EVB_SEL_OFFSET		(0x3000)
+-#define HPASS_TCSR_EVB_SEL_STRIDE		(0x1000)
+-#define HPASS_INSTANCE_IDX				(0x0)
+-
+-#define HPASS_EFUSE_Q6SS_EVB_SEL		(HPASS_TCSR_REGS_REG_OFFSET - HPASS_BASE_OFFSET + \
+-						 HPASS_TCSR_EVB_SEL_OFFSET + \
+-						 (HPASS_TCSR_EVB_SEL_STRIDE * HPASS_INSTANCE_IDX))
+-
+-#define BOOT_FSM_TIMEOUT				(10000)
+-
+-static const struct fw_rsc_devmem hpass_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00128000, .pa = 0x00128000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00147000, .pa = 0x00147000, .len = 0x00001000, },
+-	{ .name = "gcc_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "gcc_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x001b9000, .pa = 0x001b9000, .len = 0x00004000, },
+-	{ .name = "ahb2phy_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00fc0000, .pa = 0x00fc0000, .len = 0x0000d000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee4_ee4_soc", .flags = IOMMU_READ,
+-		.da = 0x010c4000, .pa = 0x010c4000, .len = 0x00001000, },
+-	{ .name = "ethernet_0_emac1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01a12000, .pa = 0x01a12000, .len = 0x00002000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00073000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc8000, .pa = 0x01fc8000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ,
+-		.da = 0x01fd4000, .pa = 0x01fd4000, .len = 0x00001000, },
+-	{ .name = "hpass_tcm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x04800000, .pa = 0x04800000, .len = 0x00080000, },
+-	{ .name = "hpass_lpass_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x05400000, .pa = 0x05400000, .len = 0x00100000, },
+-	{ .name = "usb2phy_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088e0000, .pa = 0x088e0000, .len = 0x00001000, },
+-	{ .name = "eud_mode_manager", .flags = IOMMU_READ,
+-		.da = 0x088e9000, .pa = 0x088e9000, .len = 0x00001000, },
+-	{ .name = "usb2phy_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088ea000, .pa = 0x088ea000, .len = 0x00001000, },
+-	{ .name = "usb2phy_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088eb000, .pa = 0x088eb000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b15000, .pa = 0x08b15000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b18000, .pa = 0x08b18000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_nw_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "mdss_1_mdss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08c00000, .pa = 0x08c00000, .len = 0x000d0000, },
+-	{ .name = "mdss_1_mdss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08d00000, .pa = 0x08d00000, .len = 0x00100000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09002000, .pa = 0x09002000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0900b000, .pa = 0x0900b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c0000, .pa = 0x090c0000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090d0000, .pa = 0x090d0000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09180000, .pa = 0x09180000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09190000, .pa = 0x09190000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09240000, .pa = 0x09240000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0924b000, .pa = 0x0924b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09300000, .pa = 0x09300000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0931d000, .pa = 0x0931d000, .len = 0x00002000, },
+-	{ .name = "usb3_1_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a400000, .pa = 0x0a400000, .len = 0x0000e000, },
+-	{ .name = "usb3_0_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a600000, .pa = 0x0a600000, .len = 0x0000e000, },
+-	{ .name = "mdss_0_mdss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0ae00000, .pa = 0x0ae00000, .len = 0x000d0000, },
+-	{ .name = "mdss_0_mdss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0af00000, .pa = 0x0af00000, .len = 0x00100000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "tlmm_reg", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0f1e5000, .pa = 0x0f1e5000, .len = 0x00002000, },
+-	{ .name = "qdss_apb", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x10000000, .pa = 0x10000000, .len = 0x00080000, },
+-	{ .name = "qdss_hpass_qdsp6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x11988000, .pa = 0x11988000, .len = 0x00002000, },
+-	{ .name = "qdss_hpass_stm_s", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x119b2000, .pa = 0x119b2000, .len = 0x00001000, },
+-	{ .name = "system_imem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x14680000, .pa = 0x14680000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x821ff000, .pa = 0x821ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba400000, .pa = 0xba400000, .len = 0x00a00000, },
+-	{ .name = "ddr_interleave_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xbb600000, .pa = 0xbb600000, .len = 0x00a00000, },
+-	{ .name = "ddr_interleave_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xd4e00000, .pa = 0xd4e00000, .len = 0x02000000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(HPASS, ARRAY_SIZE(hpass_mem_res));
+-
+-static TEE_Result hpass_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	if (!base)
+-		return TEE_ERROR_GENERIC;
+-
+-	/*
+-	 * Program the firmware entry address and select the programmed EVB;
+-	 */
+-	io_write32(base + HPASS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	io_write32(base + HPASS_EFUSE_Q6SS_EVB_SEL, 0);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data __unused)
+-{
+-	return TEE_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-static TEE_Result hpass_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = HPASS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   hpass_mem_res,
+-			   HPASS_RESOURCE_TABLE_HEADER_SIZE,
+-			   HPASS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops hpass0_ops = {
+-	.fw_start = hpass_fw_start,
+-	.fw_shutdown = hpass_fw_shutdown,
+-	.get_resource_table = hpass_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/hpass0.h b/core/pta/qcom/pas/platform/nord/hpass0.h
+deleted file mode 100644
+index 7e42ce9d0..000000000
+--- a/core/pta/qcom/pas/platform/nord/hpass0.h
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* SPDX-License-Identifier: BSD-2-Clause */
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#ifndef _HPASS0_H_
+-#define _HPASS0_H_
+-
+-#include "pas_subsys.h"
+-
+-extern const struct qcom_pas_ops hpass0_ops;
+-
+-#endif /* _HPASS0_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/hpass1.c b/core/pta/qcom/pas/platform/nord/hpass1.c
+deleted file mode 100644
+index a889bbc87..000000000
+--- a/core/pta/qcom/pas/platform/nord/hpass1.c
++++ /dev/null
+@@ -1,314 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-
+-#include "hpass1.h"
+-
+-/*
+- * QDSP6 boot registers for each HPS instance. The PUB block
+- * holds the reset/boot FSM registers; the TCSR block holds the EVB select.
+- */
+-#define HPASS_BASE_OFFSET				(0x2000000)
+-#define HPASS_TCSR_REGS_REG_OFFSET		(0x1580000)
+-
+-#define HPASS_QDSP6SS_RST_EVB			(0x10)
+-
+-#define HPASS_TCSR_EVB_SEL_OFFSET		(0x3000)
+-#define HPASS_TCSR_EVB_SEL_STRIDE		(0x1000)
+-#define HPASS_INSTANCE_IDX				(0x1)
+-
+-#define HPASS_EFUSE_Q6SS_EVB_SEL		(HPASS_TCSR_REGS_REG_OFFSET - HPASS_BASE_OFFSET + \
+-						 HPASS_TCSR_EVB_SEL_OFFSET + \
+-						 (HPASS_TCSR_EVB_SEL_STRIDE * HPASS_INSTANCE_IDX))
+-
+-#define BOOT_FSM_TIMEOUT				(10000)
+-
+-static const struct fw_rsc_devmem hpass_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00128000, .pa = 0x00128000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00147000, .pa = 0x00147000, .len = 0x00001000, },
+-	{ .name = "gcc_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "gcc_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x001b9000, .pa = 0x001b9000, .len = 0x00004000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee4_ee4_soc", .flags = IOMMU_READ,
+-		.da = 0x010c4000, .pa = 0x010c4000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00073000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc8000, .pa = 0x01fc8000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ,
+-		.da = 0x01fd4000, .pa = 0x01fd4000, .len = 0x00001000, },
+-	{ .name = "hpass_tcm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x04800000, .pa = 0x04800000, .len = 0x00080000, },
+-	{ .name = "hpass_lpass_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x05400000, .pa = 0x05400000, .len = 0x00100000, },
+-	{ .name = "usb2phy_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088e0000, .pa = 0x088e0000, .len = 0x00001000, },
+-	{ .name = "eud_mode_manager", .flags = IOMMU_READ,
+-		.da = 0x088e9000, .pa = 0x088e9000, .len = 0x00001000, },
+-	{ .name = "usb2phy_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088ea000, .pa = 0x088ea000, .len = 0x00001000, },
+-	{ .name = "usb2phy_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088eb000, .pa = 0x088eb000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09002000, .pa = 0x09002000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0900b000, .pa = 0x0900b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c0000, .pa = 0x090c0000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090d0000, .pa = 0x090d0000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09180000, .pa = 0x09180000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09190000, .pa = 0x09190000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09240000, .pa = 0x09240000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0924b000, .pa = 0x0924b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09300000, .pa = 0x09300000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0931d000, .pa = 0x0931d000, .len = 0x00002000, },
+-	{ .name = "usb3_1_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a400000, .pa = 0x0a400000, .len = 0x0000e000, },
+-	{ .name = "usb3_0_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a600000, .pa = 0x0a600000, .len = 0x0000e000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "qdss_apb", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x10000000, .pa = 0x10000000, .len = 0x00080000, },
+-	{ .name = "qdss_hpass_stm_s", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x119b2000, .pa = 0x119b2000, .len = 0x00001000, },
+-	{ .name = "system_imem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x14680000, .pa = 0x14680000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x821ff000, .pa = 0x821ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xbb600000, .pa = 0xbb600000, .len = 0x00a00000, },
+-	{ .name = "ddr_interleave_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xd4e00000, .pa = 0xd4e00000, .len = 0x02000000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(HPASS, ARRAY_SIZE(hpass_mem_res));
+-
+-static TEE_Result hpass_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	if (!base)
+-		return TEE_ERROR_GENERIC;
+-
+-	/*
+-	 * Program the firmware entry address and select the programmed EVB;
+-	 */
+-	io_write32(base + HPASS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	io_write32(base + HPASS_EFUSE_Q6SS_EVB_SEL, 0);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data __unused)
+-{
+-	return TEE_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-static TEE_Result hpass_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = HPASS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   hpass_mem_res,
+-			   HPASS_RESOURCE_TABLE_HEADER_SIZE,
+-			   HPASS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops hpass1_ops = {
+-	.fw_start = hpass_fw_start,
+-	.fw_shutdown = hpass_fw_shutdown,
+-	.get_resource_table = hpass_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/hpass1.h b/core/pta/qcom/pas/platform/nord/hpass1.h
+deleted file mode 100644
+index ae1a004b4..000000000
+--- a/core/pta/qcom/pas/platform/nord/hpass1.h
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* SPDX-License-Identifier: BSD-2-Clause */
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#ifndef _HPASS1_H_
+-#define _HPASS1_H_
+-
+-#include "pas_subsys.h"
+-
+-extern const struct qcom_pas_ops hpass1_ops;
+-
+-#endif /* _HPASS1_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/hpass2.c b/core/pta/qcom/pas/platform/nord/hpass2.c
+deleted file mode 100644
+index 4f8e1244d..000000000
+--- a/core/pta/qcom/pas/platform/nord/hpass2.c
++++ /dev/null
+@@ -1,315 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-
+-#include "hpass2.h"
+-
+-/*
+- * QDSP6 boot registers for each HPS instance. The PUB block
+- * holds the reset/boot FSM registers; the TCSR block holds the EVB select.
+- */
+-#define HPASS_BASE_OFFSET				(0x2100000)
+-#define HPASS_TCSR_REGS_REG_OFFSET		(0x1580000)
+-
+-#define HPASS_QDSP6SS_RST_EVB			(0x10)
+-
+-#define HPASS_TCSR_EVB_SEL_OFFSET		(0x3000)
+-#define HPASS_TCSR_EVB_SEL_STRIDE		(0x1000)
+-#define HPASS_INSTANCE_IDX				(0x2)
+-
+-#define HPASS_EFUSE_Q6SS_EVB_SEL		(HPASS_TCSR_REGS_REG_OFFSET - HPASS_BASE_OFFSET + \
+-						 HPASS_TCSR_EVB_SEL_OFFSET + \
+-						 (HPASS_TCSR_EVB_SEL_STRIDE * HPASS_INSTANCE_IDX))
+-
+-#define BOOT_FSM_TIMEOUT				(10000)
+-
+-static const struct fw_rsc_devmem hpass_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00128000, .pa = 0x00128000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00147000, .pa = 0x00147000, .len = 0x00001000, },
+-	{ .name = "gcc_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "gcc_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x001b9000, .pa = 0x001b9000, .len = 0x00004000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee4_ee4_soc", .flags = IOMMU_READ,
+-		.da = 0x010c4000, .pa = 0x010c4000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00073000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc8000, .pa = 0x01fc8000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ,
+-		.da = 0x01fd4000, .pa = 0x01fd4000, .len = 0x00001000, },
+-	{ .name = "hpass_tcm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x04800000, .pa = 0x04800000, .len = 0x00080000, },
+-	{ .name = "hpass_lpass_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x05400000, .pa = 0x05400000, .len = 0x00100000, },
+-	{ .name = "usb2phy_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088e0000, .pa = 0x088e0000, .len = 0x00001000, },
+-	{ .name = "eud_mode_manager", .flags = IOMMU_READ,
+-		.da = 0x088e9000, .pa = 0x088e9000, .len = 0x00001000, },
+-	{ .name = "usb2phy_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088ea000, .pa = 0x088ea000, .len = 0x00001000, },
+-	{ .name = "usb2phy_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x088eb000, .pa = 0x088eb000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09002000, .pa = 0x09002000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0900b000, .pa = 0x0900b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c0000, .pa = 0x090c0000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090d0000, .pa = 0x090d0000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09180000, .pa = 0x09180000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09190000, .pa = 0x09190000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09240000, .pa = 0x09240000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0924b000, .pa = 0x0924b000, .len = 0x00002000, },
+-	{ .name = "ipc_soc_ipc_co_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09300000, .pa = 0x09300000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0931d000, .pa = 0x0931d000, .len = 0x00002000, },
+-	{ .name = "usb3_1_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a400000, .pa = 0x0a400000, .len = 0x0000e000, },
+-	{ .name = "usb3_0_usb31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0a600000, .pa = 0x0a600000, .len = 0x0000e000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "qdss_apb", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x10000000, .pa = 0x10000000, .len = 0x00080000, },
+-	{ .name = "qdss_hpass_stm_s", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x119b2000, .pa = 0x119b2000, .len = 0x00001000, },
+-	{ .name = "system_imem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x14680000, .pa = 0x14680000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x821ff000, .pa = 0x821ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xbb600000, .pa = 0xbb600000, .len = 0x00a00000, },
+-	{ .name = "ddr_interleave_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xd4e00000, .pa = 0xd4e00000, .len = 0x02000000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(HPASS, ARRAY_SIZE(hpass_mem_res));
+-
+-static TEE_Result hpass_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	if (!base)
+-		return TEE_ERROR_GENERIC;
+-
+-	/*
+-	 * Program the firmware entry address and select the programmed EVB;
+-	 * the Q6 PLL and core RCG are already configured by hpass_setup().
+-	 */
+-	io_write32(base + HPASS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	io_write32(base + HPASS_EFUSE_Q6SS_EVB_SEL, 0);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data __unused)
+-{
+-	return TEE_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-static TEE_Result hpass_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = HPASS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(HPASS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   hpass_mem_res,
+-			   HPASS_RESOURCE_TABLE_HEADER_SIZE,
+-			   HPASS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops hpass2_ops = {
+-	.fw_start = hpass_fw_start,
+-	.fw_shutdown = hpass_fw_shutdown,
+-	.get_resource_table = hpass_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss.c b/core/pta/qcom/pas/platform/nord/nspss.c
+new file mode 100644
+index 000000000..267b3c972
+--- /dev/null
++++ b/core/pta/qcom/pas/platform/nord/nspss.c
+@@ -0,0 +1,143 @@
++// SPDX-License-Identifier: BSD-2-Clause
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#include <io.h>
++#include <kernel/cache_helpers.h>
++#include <mm/core_memprot.h>
++#include <mm/core_mmu.h>
++#include <platform_config.h>
++#include <resource_table.h>
++#include <stdint.h>
++#include <string.h>
++#include <trace.h>
++
++#include "nspss.h"
++
++#define NSPSS_QDSP6SS_RST_EVB		(0x10)
++
++#define BOOT_FSM_TIMEOUT	10000
++
++/* Per-instance resource tables; blank placeholders, filled in later per-instance */
++static const struct fw_rsc_devmem nspss0_mem_res[] = { };
++static const struct fw_rsc_devmem nspss1_mem_res[] = { };
++static const struct fw_rsc_devmem nspss2_mem_res[] = { };
++static const struct fw_rsc_devmem nspss3_mem_res[] = { };
++
++DEFINE_RESOURCE_TABLE(NSPSS0, ARRAY_SIZE(nspss0_mem_res));
++DEFINE_RESOURCE_TABLE(NSPSS1, ARRAY_SIZE(nspss1_mem_res));
++DEFINE_RESOURCE_TABLE(NSPSS2, ARRAY_SIZE(nspss2_mem_res));
++DEFINE_RESOURCE_TABLE(NSPSS3, ARRAY_SIZE(nspss3_mem_res));
++
++static TEE_Result nspss_fw_start(struct qcom_pas_data *data)
++{
++	vaddr_t base = io_pa_or_va(&data->base, data->size);
++
++	/* Program firmware */
++	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
++	dsb();
++
++	return TEE_SUCCESS;
++}
++
++static TEE_Result nspss_fw_shutdown(struct qcom_pas_data *data)
++{
++	return qcom_clock_pas_reset(data->clk_group);
++}
++
++static TEE_Result nspss0_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = NSPSS0_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS0)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   nspss0_mem_res,
++			   NSPSS0_RESOURCE_TABLE_HEADER_SIZE,
++			   NSPSS0_RESOURCE_TABLE_SIZE);
++}
++
++static TEE_Result nspss1_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = NSPSS1_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS1)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   nspss1_mem_res,
++			   NSPSS1_RESOURCE_TABLE_HEADER_SIZE,
++			   NSPSS1_RESOURCE_TABLE_SIZE);
++}
++
++static TEE_Result nspss2_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = NSPSS2_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS2)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   nspss2_mem_res,
++			   NSPSS2_RESOURCE_TABLE_HEADER_SIZE,
++			   NSPSS2_RESOURCE_TABLE_SIZE);
++}
++
++static TEE_Result nspss3_get_resource_table(struct resource_table *rt,
++					   size_t *rt_size)
++{
++	const struct fw_rsc_hdr header = {
++		.type = RSC_DEVMEM,
++	};
++	static struct resource_table table = {
++		.ver = 1,
++		.num = NSPSS3_NUM_MEM_RESOURCES,
++		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS3)] = 0,
++	};
++
++	return get_mem_rsc(rt, rt_size, &table, &header,
++			   nspss3_mem_res,
++			   NSPSS3_RESOURCE_TABLE_HEADER_SIZE,
++			   NSPSS3_RESOURCE_TABLE_SIZE);
++}
++
++const struct qcom_pas_ops nspss0_ops = {
++	.fw_start = nspss_fw_start,
++	.fw_shutdown = nspss_fw_shutdown,
++	.get_resource_table = nspss0_get_resource_table,
++};
++
++const struct qcom_pas_ops nspss1_ops = {
++	.fw_start = nspss_fw_start,
++	.fw_shutdown = nspss_fw_shutdown,
++	.get_resource_table = nspss1_get_resource_table,
++};
++
++const struct qcom_pas_ops nspss2_ops = {
++	.fw_start = nspss_fw_start,
++	.fw_shutdown = nspss_fw_shutdown,
++	.get_resource_table = nspss2_get_resource_table,
++};
++
++const struct qcom_pas_ops nspss3_ops = {
++	.fw_start = nspss_fw_start,
++	.fw_shutdown = nspss_fw_shutdown,
++	.get_resource_table = nspss3_get_resource_table,
++};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss1.h b/core/pta/qcom/pas/platform/nord/nspss.h
+similarity index 50%
+rename from core/pta/qcom/pas/platform/nord/nspss1.h
+rename to core/pta/qcom/pas/platform/nord/nspss.h
+index 54c0637e9..696d1ee5b 100644
+--- a/core/pta/qcom/pas/platform/nord/nspss1.h
++++ b/core/pta/qcom/pas/platform/nord/nspss.h
+@@ -3,11 +3,14 @@
+  * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+  */
+ 
+-#ifndef _NSPSS1_H_
+-#define _NSPSS1_H_
++#ifndef _NSPSS_H_
++#define _NSPSS_H_
+ 
+ #include "pas_subsys.h"
+ 
++extern const struct qcom_pas_ops nspss0_ops;
+ extern const struct qcom_pas_ops nspss1_ops;
++extern const struct qcom_pas_ops nspss2_ops;
++extern const struct qcom_pas_ops nspss3_ops;
+ 
+-#endif /* _NSPSS1_H_ */
++#endif /* _NSPSS_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/nspss0.c b/core/pta/qcom/pas/platform/nord/nspss0.c
+deleted file mode 100644
+index 897fbb457..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss0.c
++++ /dev/null
+@@ -1,398 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <kernel/cache_helpers.h>
+-#include <mm/core_memprot.h>
+-#include <mm/core_mmu.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-#include <trace.h>
+-
+-#include "nspss0.h"
+-
+-#define NSPSS_QDSP6SS_RST_EVB		(0x10)
+-
+-static const struct fw_rsc_devmem nspss_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00628000, .pa = 0x00628000, .len = 0x00004000, },
+-	{ .name = "mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0062c000, .pa = 0x0062c000, .len = 0x00004000, },
+-	{ .name = "mmcx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00630000, .pa = 0x00630000, .len = 0x00004000, },
+-	{ .name = "nsp0_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00634000, .pa = 0x00634000, .len = 0x00004000, },
+-	{ .name = "mx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00638000, .pa = 0x00638000, .len = 0x00004000, },
+-	{ .name = "nsp1_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0063c000, .pa = 0x0063c000, .len = 0x00004000, },
+-	{ .name = "nsp2_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00674000, .pa = 0x00674000, .len = 0x00004000, },
+-	{ .name = "nsp3_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00678000, .pa = 0x00678000, .len = 0x00004000, },
+-	{ .name = "nsp_mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0067c000, .pa = 0x0067c000, .len = 0x00004000, },
+-	{ .name = "qss_nsp3_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01010000, .pa = 0x01010000, .len = 0x00001000, },
+-	{ .name = "qss_nsp2_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01011000, .pa = 0x01011000, .len = 0x00001000, },
+-	{ .name = "qss_nsp1_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01012000, .pa = 0x01012000, .len = 0x00001000, },
+-	{ .name = "qss_nsp0_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01013000, .pa = 0x01013000, .len = 0x00001000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee10_ee10_so", .flags = IOMMU_READ,
+-		.da = 0x010ca000, .pa = 0x010ca000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00080000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc0000, .pa = 0x01fc0000, .len = 0x00010000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01fd0000, .pa = 0x01fd0000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_3", .flags = IOMMU_READ,
+-		.da = 0x01fd1000, .pa = 0x01fd1000, .len = 0x0001a000, },
+-	{ .name = "tcsr_tcsr_regs_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01feb000, .pa = 0x01feb000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_5", .flags = IOMMU_READ,
+-		.da = 0x01fec000, .pa = 0x01fec000, .len = 0x00004000, },
+-	{ .name = "gpu_0_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x03d9a000, .pa = 0x03d9a000, .len = 0x00004000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09003000, .pa = 0x09003000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c1000, .pa = 0x090c1000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09181000, .pa = 0x09181000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09241000, .pa = 0x09241000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09301000, .pa = 0x09301000, .len = 0x00004000, },
+-	{ .name = "gpu_1_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0989a000, .pa = 0x0989a000, .len = 0x00004000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "rpmh_cprf_cprf_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c200000, .pa = 0x0c200000, .len = 0x00006000, },
+-	{ .name = "rpmh_cprf_cprf_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c206000, .pa = 0x0c206000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c207000, .pa = 0x0c207000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c208000, .pa = 0x0c208000, .len = 0x00004000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "tlmm_reg", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0f1f6000, .pa = 0x0f1f6000, .len = 0x00007000, },
+-	{ .name = "qdss_nsp_apb0_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c1000, .pa = 0x117c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c5000, .pa = 0x117c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c6000, .pa = 0x117c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e0000, .pa = 0x117e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e5000, .pa = 0x117e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e6000, .pa = 0x117e6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c0000, .pa = 0x118c0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c1000, .pa = 0x118c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c5000, .pa = 0x118c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c6000, .pa = 0x118c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e0000, .pa = 0x118e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e1000, .pa = 0x118e1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e5000, .pa = 0x118e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e6000, .pa = 0x118e6000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "nspss_0_nspss_tc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f000000, .pa = 0x1f000000, .len = 0x00020000, },
+-	{ .name = "nspss_0_nspss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f020000, .pa = 0x1f020000, .len = 0x00010000, },
+-	{ .name = "nspss_0_nspss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f040000, .pa = 0x1f040000, .len = 0x00010000, },
+-	{ .name = "nspss_0_nspss_co", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f060000, .pa = 0x1f060000, .len = 0x00010000, },
+-	{ .name = "nspss_0_nspss_ce", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f080000, .pa = 0x1f080000, .len = 0x00010000, },
+-	{ .name = "nspss_0_nspss_ub", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0a0000, .pa = 0x1f0a0000, .len = 0x00010000, },
+-	{ .name = "nspss_0_nsp_ss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c0000, .pa = 0x1f0c0000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c1000, .pa = 0x1f0c1000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c2000, .pa = 0x1f0c2000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c3000, .pa = 0x1f0c3000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c4000, .pa = 0x1f0c4000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c6000, .pa = 0x1f0c6000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c7000, .pa = 0x1f0c7000, .len = 0x00001000, },
+-	{ .name = "nspss_0_nsp_ss_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f0c8000, .pa = 0x1f0c8000, .len = 0x00008000, },
+-	{ .name = "nspss_0_nspss_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f100000, .pa = 0x1f100000, .len = 0x00006000, },
+-	{ .name = "nspss_0_nspss_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f200000, .pa = 0x1f200000, .len = 0x0002b000, },
+-	{ .name = "nspss_0_nspss_hc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f2e0000, .pa = 0x1f2e0000, .len = 0x00010000, },
+-	{ .name = "nspss_0_qdsp6s_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f300000, .pa = 0x1f300000, .len = 0x00010000, },
+-	{ .name = "nspss_0_qdsp6ssv", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f310000, .pa = 0x1f310000, .len = 0x0000e000, },
+-	{ .name = "nspss_0_qdsp6s_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f340000, .pa = 0x1f340000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6s_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f342000, .pa = 0x1f342000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6s_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f343000, .pa = 0x1f343000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6s_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f344000, .pa = 0x1f344000, .len = 0x00004000, },
+-	{ .name = "nspss_0_qdsp6s_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f348000, .pa = 0x1f348000, .len = 0x00008000, },
+-	{ .name = "nspss_0_qdsp6s_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f350000, .pa = 0x1f350000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6s_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f380000, .pa = 0x1f380000, .len = 0x00010000, },
+-	{ .name = "nspss_0_qdsp6s_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f390000, .pa = 0x1f390000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6s_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f3a0000, .pa = 0x1f3a0000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f3a1000, .pa = 0x1f3a1000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f3a2000, .pa = 0x1f3a2000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f3a3000, .pa = 0x1f3a3000, .len = 0x00001000, },
+-	{ .name = "nspss_0_qdsp6_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f3c0000, .pa = 0x1f3c0000, .len = 0x00010000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "qfprom_corr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c8000, .pa = 0x360c8000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x827ff000, .pa = 0x827ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x871ff000, .pa = 0x871ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(NSPSS, ARRAY_SIZE(nspss_mem_res));
+-
+-#define BOOT_FSM_TIMEOUT	10000
+-
+-
+-static TEE_Result nspss0_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	/* Program firmware */
+-	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result nspss0_fw_shutdown(struct qcom_pas_data *data)
+-{
+-	return qcom_clock_pas_reset(data->clk_group);
+-}
+-
+-static TEE_Result nspss0_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = NSPSS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   nspss_mem_res,
+-			   NSPSS_RESOURCE_TABLE_HEADER_SIZE,
+-			   NSPSS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops nspss0_ops = {
+-	.fw_start = nspss0_fw_start,
+-	.fw_shutdown = nspss0_fw_shutdown,
+-	.get_resource_table = nspss0_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss0.h b/core/pta/qcom/pas/platform/nord/nspss0.h
+deleted file mode 100644
+index eadece0f6..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss0.h
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* SPDX-License-Identifier: BSD-2-Clause */
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#ifndef _NSPSS0_H_
+-#define _NSPSS0_H_
+-
+-#include "pas_subsys.h"
+-
+-extern const struct qcom_pas_ops nspss0_ops;
+-
+-#endif /* _NSPSS0_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/nspss1.c b/core/pta/qcom/pas/platform/nord/nspss1.c
+deleted file mode 100644
+index 2f400ddc8..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss1.c
++++ /dev/null
+@@ -1,356 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <kernel/cache_helpers.h>
+-#include <mm/core_memprot.h>
+-#include <mm/core_mmu.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-#include <trace.h>
+-
+-#include "nspss1.h"
+-
+-#define NSPSS_QDSP6SS_RST_EVB		(0x10)
+-
+-static const struct fw_rsc_devmem nspss_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00628000, .pa = 0x00628000, .len = 0x00004000, },
+-	{ .name = "mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0062c000, .pa = 0x0062c000, .len = 0x00004000, },
+-	{ .name = "mmcx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00630000, .pa = 0x00630000, .len = 0x00004000, },
+-	{ .name = "nsp0_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00634000, .pa = 0x00634000, .len = 0x00004000, },
+-	{ .name = "mx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00638000, .pa = 0x00638000, .len = 0x00004000, },
+-	{ .name = "nsp1_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0063c000, .pa = 0x0063c000, .len = 0x00004000, },
+-	{ .name = "nsp2_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00674000, .pa = 0x00674000, .len = 0x00004000, },
+-	{ .name = "nsp3_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00678000, .pa = 0x00678000, .len = 0x00004000, },
+-	{ .name = "nsp_mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0067c000, .pa = 0x0067c000, .len = 0x00004000, },
+-	{ .name = "qss_nsp3_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01010000, .pa = 0x01010000, .len = 0x00001000, },
+-	{ .name = "qss_nsp2_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01011000, .pa = 0x01011000, .len = 0x00001000, },
+-	{ .name = "qss_nsp1_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01012000, .pa = 0x01012000, .len = 0x00001000, },
+-	{ .name = "qss_nsp0_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01013000, .pa = 0x01013000, .len = 0x00001000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee10_ee10_so", .flags = IOMMU_READ,
+-		.da = 0x010ca000, .pa = 0x010ca000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00080000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc0000, .pa = 0x01fc0000, .len = 0x00010000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01fd0000, .pa = 0x01fd0000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_3", .flags = IOMMU_READ,
+-		.da = 0x01fd1000, .pa = 0x01fd1000, .len = 0x0001a000, },
+-	{ .name = "tcsr_tcsr_regs_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01feb000, .pa = 0x01feb000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_5", .flags = IOMMU_READ,
+-		.da = 0x01fec000, .pa = 0x01fec000, .len = 0x00004000, },
+-	{ .name = "gpu_0_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x03d9a000, .pa = 0x03d9a000, .len = 0x00004000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09003000, .pa = 0x09003000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c1000, .pa = 0x090c1000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09181000, .pa = 0x09181000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09241000, .pa = 0x09241000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09301000, .pa = 0x09301000, .len = 0x00004000, },
+-	{ .name = "gpu_1_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0989a000, .pa = 0x0989a000, .len = 0x00004000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "rpmh_cprf_cprf_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c200000, .pa = 0x0c200000, .len = 0x00006000, },
+-	{ .name = "rpmh_cprf_cprf_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c206000, .pa = 0x0c206000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c207000, .pa = 0x0c207000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c208000, .pa = 0x0c208000, .len = 0x00004000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "tlmm_reg", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0f1f6000, .pa = 0x0f1f6000, .len = 0x00007000, },
+-	{ .name = "qdss_nsp_apb0_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c1000, .pa = 0x117c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c5000, .pa = 0x117c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c6000, .pa = 0x117c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e0000, .pa = 0x117e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e5000, .pa = 0x117e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e6000, .pa = 0x117e6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c0000, .pa = 0x118c0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c1000, .pa = 0x118c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c5000, .pa = 0x118c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c6000, .pa = 0x118c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e0000, .pa = 0x118e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e1000, .pa = 0x118e1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e5000, .pa = 0x118e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e6000, .pa = 0x118e6000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "nspss_1_nspss_tc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f400000, .pa = 0x1f400000, .len = 0x00020000, },
+-	{ .name = "nspss_1_nspss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f420000, .pa = 0x1f420000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f440000, .pa = 0x1f440000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_co", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f460000, .pa = 0x1f460000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_ce", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f480000, .pa = 0x1f480000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_ub", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f4a0000, .pa = 0x1f4a0000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f4c0000, .pa = 0x1f4c0000, .len = 0x00010000, },
+-	{ .name = "nspss_1_nspss_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f500000, .pa = 0x1f500000, .len = 0x00006000, },
+-	{ .name = "nspss_1_nspss_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f600000, .pa = 0x1f600000, .len = 0x0002b000, },
+-	{ .name = "nspss_1_nspss_hc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f6e0000, .pa = 0x1f6e0000, .len = 0x00010000, },
+-	{ .name = "nspss_1_qdsp6ssv", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f700000, .pa = 0x1f700000, .len = 0x00100000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "qfprom_corr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c8000, .pa = 0x360c8000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x827ff000, .pa = 0x827ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x871ff000, .pa = 0x871ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(NSPSS, ARRAY_SIZE(nspss_mem_res));
+-
+-#define BOOT_FSM_TIMEOUT	10000
+-
+-
+-static TEE_Result nspss1_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	/* Program firmware */
+-	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result nspss1_fw_shutdown(struct qcom_pas_data *data)
+-{
+-	return qcom_clock_pas_reset(data->clk_group);
+-}
+-
+-static TEE_Result nspss1_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = NSPSS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   nspss_mem_res,
+-			   NSPSS_RESOURCE_TABLE_HEADER_SIZE,
+-			   NSPSS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops nspss1_ops = {
+-	.fw_start = nspss1_fw_start,
+-	.fw_shutdown = nspss1_fw_shutdown,
+-	.get_resource_table = nspss1_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss2.c b/core/pta/qcom/pas/platform/nord/nspss2.c
+deleted file mode 100644
+index 6394f5607..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss2.c
++++ /dev/null
+@@ -1,352 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <kernel/cache_helpers.h>
+-#include <mm/core_memprot.h>
+-#include <mm/core_mmu.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-#include <trace.h>
+-
+-#include "nspss2.h"
+-
+-#define NSPSS_QDSP6SS_RST_EVB		(0x10)
+-
+-static const struct fw_rsc_devmem nspss_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00628000, .pa = 0x00628000, .len = 0x00004000, },
+-	{ .name = "mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0062c000, .pa = 0x0062c000, .len = 0x00004000, },
+-	{ .name = "mmcx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00630000, .pa = 0x00630000, .len = 0x00004000, },
+-	{ .name = "nsp0_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00634000, .pa = 0x00634000, .len = 0x00004000, },
+-	{ .name = "mx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00638000, .pa = 0x00638000, .len = 0x00004000, },
+-	{ .name = "nsp1_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0063c000, .pa = 0x0063c000, .len = 0x00004000, },
+-	{ .name = "nsp2_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00674000, .pa = 0x00674000, .len = 0x00004000, },
+-	{ .name = "nsp3_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00678000, .pa = 0x00678000, .len = 0x00004000, },
+-	{ .name = "nsp_mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0067c000, .pa = 0x0067c000, .len = 0x00004000, },
+-	{ .name = "qss_nsp3_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01010000, .pa = 0x01010000, .len = 0x00001000, },
+-	{ .name = "qss_nsp2_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01011000, .pa = 0x01011000, .len = 0x00001000, },
+-	{ .name = "qss_nsp1_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01012000, .pa = 0x01012000, .len = 0x00001000, },
+-	{ .name = "qss_nsp0_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01013000, .pa = 0x01013000, .len = 0x00001000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee10_ee10_so", .flags = IOMMU_READ,
+-		.da = 0x010ca000, .pa = 0x010ca000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00080000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc0000, .pa = 0x01fc0000, .len = 0x00010000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ,
+-		.da = 0x01fd1000, .pa = 0x01fd1000, .len = 0x0001a000, },
+-	{ .name = "tcsr_tcsr_regs_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01feb000, .pa = 0x01feb000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_4", .flags = IOMMU_READ,
+-		.da = 0x01fec000, .pa = 0x01fec000, .len = 0x00004000, },
+-	{ .name = "gpu_0_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x03d9a000, .pa = 0x03d9a000, .len = 0x00004000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09003000, .pa = 0x09003000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c1000, .pa = 0x090c1000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09181000, .pa = 0x09181000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09241000, .pa = 0x09241000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09301000, .pa = 0x09301000, .len = 0x00004000, },
+-	{ .name = "gpu_1_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0989a000, .pa = 0x0989a000, .len = 0x00004000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "rpmh_cprf_cprf_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c206000, .pa = 0x0c206000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c207000, .pa = 0x0c207000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c208000, .pa = 0x0c208000, .len = 0x00004000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "tlmm_reg", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0f1f6000, .pa = 0x0f1f6000, .len = 0x00007000, },
+-	{ .name = "qdss_nsp_apb0_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c1000, .pa = 0x117c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c5000, .pa = 0x117c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c6000, .pa = 0x117c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e0000, .pa = 0x117e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e5000, .pa = 0x117e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e6000, .pa = 0x117e6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c0000, .pa = 0x118c0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c1000, .pa = 0x118c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c5000, .pa = 0x118c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c6000, .pa = 0x118c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e0000, .pa = 0x118e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e1000, .pa = 0x118e1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e5000, .pa = 0x118e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e6000, .pa = 0x118e6000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "nspss_2_nspss_tc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f800000, .pa = 0x1f800000, .len = 0x00020000, },
+-	{ .name = "nspss_2_nspss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f820000, .pa = 0x1f820000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f840000, .pa = 0x1f840000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_co", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f860000, .pa = 0x1f860000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_ce", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f880000, .pa = 0x1f880000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_ub", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f8a0000, .pa = 0x1f8a0000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f8c0000, .pa = 0x1f8c0000, .len = 0x00010000, },
+-	{ .name = "nspss_2_nspss_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1f900000, .pa = 0x1f900000, .len = 0x00006000, },
+-	{ .name = "nspss_2_nspss_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fa00000, .pa = 0x1fa00000, .len = 0x0002b000, },
+-	{ .name = "nspss_2_nspss_hc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fae0000, .pa = 0x1fae0000, .len = 0x00010000, },
+-	{ .name = "nspss_2_qdsp6ssv", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fb00000, .pa = 0x1fb00000, .len = 0x00100000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "qfprom_corr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c8000, .pa = 0x360c8000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x827ff000, .pa = 0x827ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x871ff000, .pa = 0x871ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(NSPSS, ARRAY_SIZE(nspss_mem_res));
+-
+-#define BOOT_FSM_TIMEOUT	10000
+-
+-
+-static TEE_Result nspss2_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	/* Program firmware */
+-	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result nspss2_fw_shutdown(struct qcom_pas_data *data)
+-{
+-	return qcom_clock_pas_reset(data->clk_group);
+-}
+-
+-static TEE_Result nspss2_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = NSPSS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   nspss_mem_res,
+-			   NSPSS_RESOURCE_TABLE_HEADER_SIZE,
+-			   NSPSS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops nspss2_ops = {
+-	.fw_start = nspss2_fw_start,
+-	.fw_shutdown = nspss2_fw_shutdown,
+-	.get_resource_table = nspss2_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss2.h b/core/pta/qcom/pas/platform/nord/nspss2.h
+deleted file mode 100644
+index ccc8d0879..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss2.h
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* SPDX-License-Identifier: BSD-2-Clause */
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#ifndef _NSPSS2_H_
+-#define _NSPSS2_H_
+-
+-#include "pas_subsys.h"
+-
+-extern const struct qcom_pas_ops nspss2_ops;
+-
+-#endif /* _NSPSS2_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/nspss3.c b/core/pta/qcom/pas/platform/nord/nspss3.c
+deleted file mode 100644
+index f9faf39af..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss3.c
++++ /dev/null
+@@ -1,352 +0,0 @@
+-// SPDX-License-Identifier: BSD-2-Clause
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#include <io.h>
+-#include <kernel/cache_helpers.h>
+-#include <mm/core_memprot.h>
+-#include <mm/core_mmu.h>
+-#include <platform_config.h>
+-#include <resource_table.h>
+-#include <stdint.h>
+-#include <string.h>
+-#include <trace.h>
+-
+-#include "nspss3.h"
+-
+-#define NSPSS_QDSP6SS_RST_EVB		(0x10)
+-
+-static const struct fw_rsc_devmem nspss_mem_res[] = {
+-	{ .name = "gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x00100000, .pa = 0x00100000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x00101000, .pa = 0x00101000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x00102000, .pa = 0x00102000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x00103000, .pa = 0x00103000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x00104000, .pa = 0x00104000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x00105000, .pa = 0x00105000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x00106000, .pa = 0x00106000, .len = 0x00001000, },
+-	{ .name = "gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x00107000, .pa = 0x00107000, .len = 0x00001000, },
+-	{ .name = "gcc_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0011f000, .pa = 0x0011f000, .len = 0x00001000, },
+-	{ .name = "gcc_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00123000, .pa = 0x00123000, .len = 0x00001000, },
+-	{ .name = "gcc_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0012f000, .pa = 0x0012f000, .len = 0x00001000, },
+-	{ .name = "gcc_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00162000, .pa = 0x00162000, .len = 0x00001000, },
+-	{ .name = "cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00628000, .pa = 0x00628000, .len = 0x00004000, },
+-	{ .name = "mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0062c000, .pa = 0x0062c000, .len = 0x00004000, },
+-	{ .name = "mmcx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00630000, .pa = 0x00630000, .len = 0x00004000, },
+-	{ .name = "nsp0_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00634000, .pa = 0x00634000, .len = 0x00004000, },
+-	{ .name = "mx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00638000, .pa = 0x00638000, .len = 0x00004000, },
+-	{ .name = "nsp1_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0063c000, .pa = 0x0063c000, .len = 0x00004000, },
+-	{ .name = "nsp2_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00674000, .pa = 0x00674000, .len = 0x00004000, },
+-	{ .name = "nsp3_cx_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x00678000, .pa = 0x00678000, .len = 0x00004000, },
+-	{ .name = "nsp_mxc_cpr3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0067c000, .pa = 0x0067c000, .len = 0x00004000, },
+-	{ .name = "qss_nsp3_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01010000, .pa = 0x01010000, .len = 0x00001000, },
+-	{ .name = "qss_nsp2_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01011000, .pa = 0x01011000, .len = 0x00001000, },
+-	{ .name = "qss_nsp1_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01012000, .pa = 0x01012000, .len = 0x00001000, },
+-	{ .name = "qss_nsp0_throttl", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01013000, .pa = 0x01013000, .len = 0x00001000, },
+-	{ .name = "rng_cm_cm_soc_qr", .flags = IOMMU_READ,
+-		.da = 0x010c0000, .pa = 0x010c0000, .len = 0x00001000, },
+-	{ .name = "rng_ee10_ee10_so", .flags = IOMMU_READ,
+-		.da = 0x010ca000, .pa = 0x010ca000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01f40000, .pa = 0x01f40000, .len = 0x00080000, },
+-	{ .name = "tcsr_tcsr_regs_1", .flags = IOMMU_READ,
+-		.da = 0x01fc0000, .pa = 0x01fc0000, .len = 0x00010000, },
+-	{ .name = "tcsr_tcsr_regs_2", .flags = IOMMU_READ,
+-		.da = 0x01fd1000, .pa = 0x01fd1000, .len = 0x0001a000, },
+-	{ .name = "tcsr_tcsr_regs_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x01feb000, .pa = 0x01feb000, .len = 0x00001000, },
+-	{ .name = "tcsr_tcsr_regs_4", .flags = IOMMU_READ,
+-		.da = 0x01fec000, .pa = 0x01fec000, .len = 0x00004000, },
+-	{ .name = "gpu_0_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x03d9a000, .pa = 0x03d9a000, .len = 0x00004000, },
+-	{ .name = "ne_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08900000, .pa = 0x08900000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08901000, .pa = 0x08901000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08902000, .pa = 0x08902000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08903000, .pa = 0x08903000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08904000, .pa = 0x08904000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08905000, .pa = 0x08905000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08906000, .pa = 0x08906000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll7", .flags = IOMMU_READ,
+-		.da = 0x08907000, .pa = 0x08907000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_gpll8", .flags = IOMMU_READ,
+-		.da = 0x08908000, .pa = 0x08908000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08914000, .pa = 0x08914000, .len = 0x00001000, },
+-	{ .name = "ne_gcc_ne_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08920000, .pa = 0x08920000, .len = 0x00003000, },
+-	{ .name = "ne_gcc_ne_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08938000, .pa = 0x08938000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08a00000, .pa = 0x08a00000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08a01000, .pa = 0x08a01000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08a02000, .pa = 0x08a02000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08a03000, .pa = 0x08a03000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08a04000, .pa = 0x08a04000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08a05000, .pa = 0x08a05000, .len = 0x00001000, },
+-	{ .name = "se_gcc_gpll6", .flags = IOMMU_READ,
+-		.da = 0x08a06000, .pa = 0x08a06000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a18000, .pa = 0x08a18000, .len = 0x00003000, },
+-	{ .name = "se_gcc_se_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a1d000, .pa = 0x08a1d000, .len = 0x00001000, },
+-	{ .name = "se_gcc_se_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08a26000, .pa = 0x08a26000, .len = 0x00002000, },
+-	{ .name = "nw_gcc_gpll0", .flags = IOMMU_READ,
+-		.da = 0x08b00000, .pa = 0x08b00000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll1", .flags = IOMMU_READ,
+-		.da = 0x08b01000, .pa = 0x08b01000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll2", .flags = IOMMU_READ,
+-		.da = 0x08b02000, .pa = 0x08b02000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll3", .flags = IOMMU_READ,
+-		.da = 0x08b03000, .pa = 0x08b03000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll4", .flags = IOMMU_READ,
+-		.da = 0x08b04000, .pa = 0x08b04000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_gpll5", .flags = IOMMU_READ,
+-		.da = 0x08b05000, .pa = 0x08b05000, .len = 0x00001000, },
+-	{ .name = "nw_gcc_nw_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b1f000, .pa = 0x08b1f000, .len = 0x00003000, },
+-	{ .name = "nw_gcc_nw_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x08b32000, .pa = 0x08b32000, .len = 0x00001000, },
+-	{ .name = "ipc_soc_ipc_co_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09003000, .pa = 0x09003000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x090c1000, .pa = 0x090c1000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09181000, .pa = 0x09181000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09241000, .pa = 0x09241000, .len = 0x00004000, },
+-	{ .name = "ipc_soc_ipc_co_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x09301000, .pa = 0x09301000, .len = 0x00004000, },
+-	{ .name = "gpu_1_cpr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0989a000, .pa = 0x0989a000, .len = 0x00004000, },
+-	{ .name = "rpmh_pdc_pdc_wra", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0b200000, .pa = 0x0b200000, .len = 0x00400000, },
+-	{ .name = "rpmh_bcm", .flags = IOMMU_READ,
+-		.da = 0x0bbf0000, .pa = 0x0bbf0000, .len = 0x00003000, },
+-	{ .name = "rpmh_cprf_cprf_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c206000, .pa = 0x0c206000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c207000, .pa = 0x0c207000, .len = 0x00001000, },
+-	{ .name = "rpmh_cprf_cprf_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c208000, .pa = 0x0c208000, .len = 0x00004000, },
+-	{ .name = "aop_ss_msg_ram_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c300000, .pa = 0x0c300000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c301000, .pa = 0x0c301000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c302000, .pa = 0x0c302000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c303000, .pa = 0x0c303000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c304000, .pa = 0x0c304000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_5", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c305000, .pa = 0x0c305000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_6", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c306000, .pa = 0x0c306000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_7", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c307000, .pa = 0x0c307000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_8", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c308000, .pa = 0x0c308000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ram_9", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c309000, .pa = 0x0c309000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_10", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30a000, .pa = 0x0c30a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_11", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30b000, .pa = 0x0c30b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_12", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30c000, .pa = 0x0c30c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_13", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30d000, .pa = 0x0c30d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_14", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30e000, .pa = 0x0c30e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_15", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c30f000, .pa = 0x0c30f000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_16", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c310000, .pa = 0x0c310000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_17", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c311000, .pa = 0x0c311000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_18", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c312000, .pa = 0x0c312000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_19", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c313000, .pa = 0x0c313000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_20", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c314000, .pa = 0x0c314000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_21", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c315000, .pa = 0x0c315000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_22", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c316000, .pa = 0x0c316000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_23", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c317000, .pa = 0x0c317000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_24", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c318000, .pa = 0x0c318000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_25", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c319000, .pa = 0x0c319000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_26", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31a000, .pa = 0x0c31a000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_27", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31b000, .pa = 0x0c31b000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_28", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31c000, .pa = 0x0c31c000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_29", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31d000, .pa = 0x0c31d000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_30", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31e000, .pa = 0x0c31e000, .len = 0x00001000, },
+-	{ .name = "aop_ss_msg_ra_31", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0c31f000, .pa = 0x0c31f000, .len = 0x00001000, },
+-	{ .name = "tlmm_reg", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x0f1f6000, .pa = 0x0f1f6000, .len = 0x00007000, },
+-	{ .name = "qdss_nsp_apb0_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c1000, .pa = 0x117c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c5000, .pa = 0x117c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb0_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117c6000, .pa = 0x117c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e0000, .pa = 0x117e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e5000, .pa = 0x117e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb1_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x117e6000, .pa = 0x117e6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c0000, .pa = 0x118c0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c1000, .pa = 0x118c1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c5000, .pa = 0x118c5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb2_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118c6000, .pa = 0x118c6000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e0000, .pa = 0x118e0000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e1000, .pa = 0x118e1000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e5000, .pa = 0x118e5000, .len = 0x00001000, },
+-	{ .name = "qdss_nsp_apb3_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x118e6000, .pa = 0x118e6000, .len = 0x00001000, },
+-	{ .name = "qdss_stm", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x16000000, .pa = 0x16000000, .len = 0x01000000, },
+-	{ .name = "nspss_3_nspss_tc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fc00000, .pa = 0x1fc00000, .len = 0x00020000, },
+-	{ .name = "nspss_3_nspss_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fc20000, .pa = 0x1fc20000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fc40000, .pa = 0x1fc40000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_co", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fc60000, .pa = 0x1fc60000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_ce", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fc80000, .pa = 0x1fc80000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_ub", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fca0000, .pa = 0x1fca0000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fcc0000, .pa = 0x1fcc0000, .len = 0x00010000, },
+-	{ .name = "nspss_3_nspss_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fd00000, .pa = 0x1fd00000, .len = 0x00006000, },
+-	{ .name = "nspss_3_nspss_4", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fe00000, .pa = 0x1fe00000, .len = 0x0002b000, },
+-	{ .name = "nspss_3_nspss_hc", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1fee0000, .pa = 0x1fee0000, .len = 0x00010000, },
+-	{ .name = "nspss_3_qdsp6ssv", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x1ff00000, .pa = 0x1ff00000, .len = 0x00100000, },
+-	{ .name = "qfprom_raw", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c0000, .pa = 0x360c0000, .len = 0x00008000, },
+-	{ .name = "qfprom_corr", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x360c8000, .pa = 0x360c8000, .len = 0x00008000, },
+-	{ .name = "fuse_controller", .flags = IOMMU_READ,
+-		.da = 0x360d4000, .pa = 0x360d4000, .len = 0x00004000, },
+-	{ .name = "ddr_interleave_0", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x827ff000, .pa = 0x827ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_1", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x87148000, .pa = 0x87148000, .len = 0x00020000, },
+-	{ .name = "ddr_interleave_2", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x871ff000, .pa = 0x871ff000, .len = 0x00001000, },
+-	{ .name = "ddr_interleave_3", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0xba200000, .pa = 0xba200000, .len = 0x00200000, },
+-	/* SMEM (smem@90900000, 4 MB) holds the GLINK FIFOs the DSP must
+-	 * read/write to talk to the apps processor. Without this mapping the
+-	 * DSP takes a translation fault on its first SMEM access -> mmufault/watchdog and never reaches running.
+-	 */
+-	{ .name = "smem", .flags = IOMMU_READ | IOMMU_WRITE,
+-		.da = 0x89B00000, .pa = 0x89B00000, .len = 0x400000, },
+-};
+-
+-DEFINE_RESOURCE_TABLE(NSPSS, ARRAY_SIZE(nspss_mem_res));
+-
+-#define BOOT_FSM_TIMEOUT	10000
+-
+-
+-static TEE_Result nspss3_fw_start(struct qcom_pas_data *data)
+-{
+-	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-
+-	/* Program firmware */
+-	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	dsb();
+-
+-	return TEE_SUCCESS;
+-}
+-
+-static TEE_Result nspss3_fw_shutdown(struct qcom_pas_data *data)
+-{
+-	return qcom_clock_pas_reset(data->clk_group);
+-}
+-
+-static TEE_Result nspss3_get_resource_table(struct resource_table *rt,
+-					   size_t *rt_size)
+-{
+-	const struct fw_rsc_hdr header = {
+-		.type = RSC_DEVMEM,
+-	};
+-	static struct resource_table table = {
+-		.ver = 1,
+-		.num = NSPSS_NUM_MEM_RESOURCES,
+-		.offset[RESOURCE_TABLE_OFFSET_LAST(NSPSS)] = 0,
+-	};
+-
+-	return get_mem_rsc(rt, rt_size, &table, &header,
+-			   nspss_mem_res,
+-			   NSPSS_RESOURCE_TABLE_HEADER_SIZE,
+-			   NSPSS_RESOURCE_TABLE_SIZE);
+-}
+-
+-const struct qcom_pas_ops nspss3_ops = {
+-	.fw_start = nspss3_fw_start,
+-	.fw_shutdown = nspss3_fw_shutdown,
+-	.get_resource_table = nspss3_get_resource_table,
+-};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss3.h b/core/pta/qcom/pas/platform/nord/nspss3.h
+deleted file mode 100644
+index 7df5ab735..000000000
+--- a/core/pta/qcom/pas/platform/nord/nspss3.h
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* SPDX-License-Identifier: BSD-2-Clause */
+-/*
+- * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
+- */
+-
+-#ifndef _NSPSS3_H_
+-#define _NSPSS3_H_
+-
+-#include "pas_subsys.h"
+-
+-extern const struct qcom_pas_ops nspss3_ops;
+-
+-#endif /* _NSPSS3_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/sub.mk b/core/pta/qcom/pas/platform/nord/sub.mk
+index 6edcd4045..03a6342f1 100644
+--- a/core/pta/qcom/pas/platform/nord/sub.mk
++++ b/core/pta/qcom/pas/platform/nord/sub.mk
+@@ -1,3 +1,3 @@
+-srcs-y += subsys.c iris.c camera.c hpass0.c hpass1.c hpass2.c nspss0.c nspss1.c nspss2.c nspss3.c
++srcs-y += subsys.c iris.c camera.c hpass.c nspss.c
+ incdirs-y += .
+ incdirs-y += ../
+diff --git a/core/pta/qcom/pas/platform/nord/subsys.c b/core/pta/qcom/pas/platform/nord/subsys.c
+index 779e35dba..53183e10b 100644
+--- a/core/pta/qcom/pas/platform/nord/subsys.c
++++ b/core/pta/qcom/pas/platform/nord/subsys.c
+@@ -10,13 +10,8 @@
+ 
+ #include "camera.h"
+ #include "iris.h"
+-#include "nspss0.h"
+-#include "nspss1.h"
+-#include "nspss2.h"
+-#include "nspss3.h"
+-#include "hpass0.h"
+-#include "hpass1.h"
+-#include "hpass2.h"
++#include "hpass.h"
++#include "nspss.h"
+ #include "pas_subsys.h"
+ 
+ static struct qcom_pas_subsys subsystems[] = {
+-- 
+2.34.1
+

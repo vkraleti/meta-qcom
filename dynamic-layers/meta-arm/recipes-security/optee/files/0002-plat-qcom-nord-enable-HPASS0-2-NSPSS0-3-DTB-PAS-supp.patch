@@ -1,0 +1,488 @@
+From 34032fbea6e716d11825c8ce58a1fcf1f2aed243 Mon Sep 17 00:00:00 2001
+From: Rashmi Deep Mahawar <rdeepmah@qti.qualcomm.com>
+Date: Tue, 22 Sep 2026 15:58:42 +0530
+Subject: [PATCH 2/3] plat-qcom: nord: enable HPASS0-2/NSPSS0-3 DTB PAS support
+ and PIL Shutdown implementation
+Upstream-Status: Pending
+---
+ core/pta/qcom/pas/platform/nord/dtb_chip_id.h |  13 ++
+ core/pta/qcom/pas/platform/nord/hpass.c       | 113 ++++++++++++++----
+ core/pta/qcom/pas/platform/nord/hpass.h       |   4 +
+ core/pta/qcom/pas/platform/nord/nspss.c       |  93 +++++++++++++-
+ core/pta/qcom/pas/platform/nord/nspss.h       |   5 +
+ core/pta/qcom/pas/platform/nord/subsys.c      |  56 +++++++++
+ 6 files changed, 262 insertions(+), 22 deletions(-)
+ create mode 100644 core/pta/qcom/pas/platform/nord/dtb_chip_id.h
+
+diff --git a/core/pta/qcom/pas/platform/nord/dtb_chip_id.h b/core/pta/qcom/pas/platform/nord/dtb_chip_id.h
+new file mode 100644
+index 000000000..04944e114
+--- /dev/null
++++ b/core/pta/qcom/pas/platform/nord/dtb_chip_id.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#ifndef _DTB_CHIP_ID_H_
++#define _DTB_CHIP_ID_H_
++
++/* (CHIPINFO_FAMILY_NORDAU << 16) | CHIPINFO_ID_SMP_NORDAU, per ChipInfoDefs.h */
++#define DTB_CHIP_FAMILY_ID	0x009c0288
++#define DTB_VERSION		0x00000100
++
++#endif /* _DTB_CHIP_ID_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/hpass.c b/core/pta/qcom/pas/platform/nord/hpass.c
+index 5902e8eb6..76e6da3f6 100644
+--- a/core/pta/qcom/pas/platform/nord/hpass.c
++++ b/core/pta/qcom/pas/platform/nord/hpass.c
+@@ -9,14 +9,13 @@
+ #include <stdint.h>
+ #include <string.h>
+ 
++#include "dtb_chip_id.h"
+ #include "hpass.h"
+ 
+ /*
+  * QDSP6 boot registers for each HPS instance. The PUB block
+  * holds the reset/boot FSM registers; the TCSR block holds the EVB select.
+  */
+-#define HPASS_TCSR_REGS_REG_OFFSET		(0x1580000)
+-
+ #define HPASS_QDSP6SS_RST_EVB			(0x10)
+ 
+ #define HPASS_TCSR_EVB_SEL_OFFSET		(0x3000)
+@@ -24,14 +23,21 @@
+ 
+ #define BOOT_FSM_TIMEOUT			(10000)
+ 
+-#define HPASS0_BASE_OFFSET			(0xC00000)
+-#define HPASS1_BASE_OFFSET			(0x2000000)
+-#define HPASS2_BASE_OFFSET			(0x2100000)
+-
+ #define HPASS0_IDX				(0)
+ #define HPASS1_IDX				(1)
+ #define HPASS2_IDX				(2)
+ 
++/*
++ * DTB boot-parameter registers, HPASS-instance-base-relative (HPASS's PUB
++ * block starts at the instance base directly, unlike CDSP). Register 4
++ * (0x70, platform-info) is intentionally omitted, matching ipq96xx/cdsp.c.
++ */
++#define DTB_CONFIG_0_REG			0x60
++#define DTB_CONFIG_1_REG			0x64
++#define DTB_CONFIG_2_REG			0x68
++#define DTB_CONFIG_3_REG			0x6c
++#define DTB_CONFIG_5_REG			0x74
++
+ /* Per-instance resource tables; blank placeholders, filled in later per-instance */
+ static const struct fw_rsc_devmem hpass0_mem_res[] = { };
+ static const struct fw_rsc_devmem hpass1_mem_res[] = { };
+@@ -42,19 +48,26 @@ DEFINE_RESOURCE_TABLE(HPASS1, ARRAY_SIZE(hpass1_mem_res));
+ DEFINE_RESOURCE_TABLE(HPASS2, ARRAY_SIZE(hpass2_mem_res));
+ 
+ /*
+- * Shared boot routine. base_offset/idx reproduce each instance's former
+- * HPASS_EFUSE_Q6SS_EVB_SEL macro exactly, now passed in as call-site
+- * constants instead of being duplicated per file.
++ * Shared boot routine. idx reproduces each instance's former
++ * HPASS_EFUSE_Q6SS_EVB_SEL macro exactly, now passed in as a call-site
++ * constant instead of being duplicated per file. The EVB-select register
++ * is indexed off HPASS_TCSR_BASE directly rather than being derived by
++ * subtracting a per-instance offset from the PUB-block base, since that
++ * subtraction underflows for HPASS1/HPASS2.
++ *
++ * Boot params (DTB) are programmed separately by the DTB companion's own
++ * fw_start below, mirroring TZ's split between hpass_program_boot_addr()
++ * (RST_EVB + EVB_SEL) and hpass_dtb_bring_up() (BOOT_PARAMS).
+  */
+-static TEE_Result hpass_fw_start(struct qcom_pas_data *data,
+-				 uint32_t base_offset, uint32_t idx)
++static TEE_Result hpass_fw_start(struct qcom_pas_data *data, uint32_t idx)
+ {
+ 	vaddr_t base = io_pa_or_va(&data->base, data->size);
+-	uint32_t evb_sel = HPASS_TCSR_REGS_REG_OFFSET - base_offset +
+-			   HPASS_TCSR_EVB_SEL_OFFSET +
++	struct io_pa_va tcsr_iopv = { .pa = HPASS_TCSR_BASE };
++	vaddr_t tcsr = io_pa_or_va(&tcsr_iopv, HPASS_TCSR_SIZE);
++	uint32_t evb_sel = HPASS_TCSR_EVB_SEL_OFFSET +
+ 			   HPASS_TCSR_EVB_SEL_STRIDE * idx;
+ 
+-	if (!base)
++	if (!base || !tcsr)
+ 		return TEE_ERROR_GENERIC;
+ 
+ 	/*
+@@ -62,7 +75,7 @@ static TEE_Result hpass_fw_start(struct qcom_pas_data *data,
+ 	 * the Q6 PLL and core RCG are already configured by hpass_setup().
+ 	 */
+ 	io_write32(base + HPASS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+-	io_write32(base + evb_sel, 0);
++	io_write32(tcsr + evb_sel, 0);
+ 	dsb();
+ 
+ 	return TEE_SUCCESS;
+@@ -70,22 +83,22 @@ static TEE_Result hpass_fw_start(struct qcom_pas_data *data,
+ 
+ static TEE_Result hpass0_fw_start(struct qcom_pas_data *data)
+ {
+-	return hpass_fw_start(data, HPASS0_BASE_OFFSET, HPASS0_IDX);
++	return hpass_fw_start(data, HPASS0_IDX);
+ }
+ 
+ static TEE_Result hpass1_fw_start(struct qcom_pas_data *data)
+ {
+-	return hpass_fw_start(data, HPASS1_BASE_OFFSET, HPASS1_IDX);
++	return hpass_fw_start(data, HPASS1_IDX);
+ }
+ 
+ static TEE_Result hpass2_fw_start(struct qcom_pas_data *data)
+ {
+-	return hpass_fw_start(data, HPASS2_BASE_OFFSET, HPASS2_IDX);
++	return hpass_fw_start(data, HPASS2_IDX);
+ }
+ 
+-static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data __unused)
++static TEE_Result hpass_fw_shutdown(struct qcom_pas_data *data)
+ {
+-	return TEE_ERROR_NOT_IMPLEMENTED;
++	return qcom_clock_pas_reset(data->clk_group);
+ }
+ 
+ static TEE_Result hpass0_get_resource_table(struct resource_table *rt,
+@@ -159,3 +172,63 @@ const struct qcom_pas_ops hpass2_ops = {
+ 	.fw_shutdown = hpass_fw_shutdown,
+ 	.get_resource_table = hpass2_get_resource_table,
+ };
++
++/*
++ * DTB companion boot routine, one per HPASS instance. The DTB subsystem is
++ * window-less (no data->base/size — see pas_platform_mem_setup()'s
++ * "window-less images" handling), so each instance maps the HPASS PUB block
++ * itself off its own raw physical base, matching TZ's hpass_dtb_bring_up().
++ */
++static TEE_Result hpass_dtb_fw_start(struct qcom_pas_data *data,
++				     paddr_t hps_base, size_t hps_size)
++{
++	struct io_pa_va iopv = { .pa = hps_base };
++	vaddr_t base = io_pa_or_va(&iopv, hps_size);
++
++	if (!data->fw_base || !data->fw_size)
++		return TEE_ERROR_BAD_PARAMETERS;
++
++	io_write32(base + DTB_CONFIG_0_REG, (uint32_t)data->fw_base);
++	io_write32(base + DTB_CONFIG_1_REG, (uint32_t)(data->fw_base >> 32));
++	io_write32(base + DTB_CONFIG_2_REG, DTB_CHIP_FAMILY_ID);
++	io_write32(base + DTB_CONFIG_3_REG, DTB_VERSION);
++	io_write32(base + DTB_CONFIG_5_REG, (uint32_t)data->fw_size);
++	dsb();
++
++	return TEE_SUCCESS;
++}
++
++static TEE_Result hpass0_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_dtb_fw_start(data, HPASS_0_BASE, HPASS_0_SIZE);
++}
++
++static TEE_Result hpass1_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_dtb_fw_start(data, HPASS_1_BASE, HPASS_1_SIZE);
++}
++
++static TEE_Result hpass2_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return hpass_dtb_fw_start(data, HPASS_2_BASE, HPASS_2_SIZE);
++}
++
++static TEE_Result hpass_dtb_fw_shutdown(struct qcom_pas_data *data __unused)
++{
++	return TEE_SUCCESS;
++}
++
++const struct qcom_pas_ops hpass0_dtb_ops = {
++	.fw_start = hpass0_dtb_fw_start,
++	.fw_shutdown = hpass_dtb_fw_shutdown,
++};
++
++const struct qcom_pas_ops hpass1_dtb_ops = {
++	.fw_start = hpass1_dtb_fw_start,
++	.fw_shutdown = hpass_dtb_fw_shutdown,
++};
++
++const struct qcom_pas_ops hpass2_dtb_ops = {
++	.fw_start = hpass2_dtb_fw_start,
++	.fw_shutdown = hpass_dtb_fw_shutdown,
++};
+diff --git a/core/pta/qcom/pas/platform/nord/hpass.h b/core/pta/qcom/pas/platform/nord/hpass.h
+index 529522455..c4127a3c0 100644
+--- a/core/pta/qcom/pas/platform/nord/hpass.h
++++ b/core/pta/qcom/pas/platform/nord/hpass.h
+@@ -12,4 +12,8 @@ extern const struct qcom_pas_ops hpass0_ops;
+ extern const struct qcom_pas_ops hpass1_ops;
+ extern const struct qcom_pas_ops hpass2_ops;
+ 
++extern const struct qcom_pas_ops hpass0_dtb_ops;
++extern const struct qcom_pas_ops hpass1_dtb_ops;
++extern const struct qcom_pas_ops hpass2_dtb_ops;
++
+ #endif /* _HPASS_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/nspss.c b/core/pta/qcom/pas/platform/nord/nspss.c
+index 267b3c972..ccae29498 100644
+--- a/core/pta/qcom/pas/platform/nord/nspss.c
++++ b/core/pta/qcom/pas/platform/nord/nspss.c
+@@ -13,12 +13,24 @@
+ #include <string.h>
+ #include <trace.h>
+ 
++#include "clock_group.h"
++#include "dtb_chip_id.h"
+ #include "nspss.h"
+ 
+ #define NSPSS_QDSP6SS_RST_EVB		(0x10)
+ 
+ #define BOOT_FSM_TIMEOUT	10000
+ 
++/*
++ * DTB boot-parameter registers, PUB-block-relative. Register 4 (0x70,
++ * platform-info) is intentionally omitted, matching ipq96xx/cdsp.c.
++ */
++#define DTB_CONFIG_0_REG		0x60
++#define DTB_CONFIG_1_REG		0x64
++#define DTB_CONFIG_2_REG		0x68
++#define DTB_CONFIG_3_REG		0x6c
++#define DTB_CONFIG_5_REG		0x74
++
+ /* Per-instance resource tables; blank placeholders, filled in later per-instance */
+ static const struct fw_rsc_devmem nspss0_mem_res[] = { };
+ static const struct fw_rsc_devmem nspss1_mem_res[] = { };
+@@ -30,12 +42,18 @@ DEFINE_RESOURCE_TABLE(NSPSS1, ARRAY_SIZE(nspss1_mem_res));
+ DEFINE_RESOURCE_TABLE(NSPSS2, ARRAY_SIZE(nspss2_mem_res));
+ DEFINE_RESOURCE_TABLE(NSPSS3, ARRAY_SIZE(nspss3_mem_res));
+ 
++/*
++ * Program the firmware boot address only. Boot params (DTB) are programmed
++ * separately by the DTB companion's own fw_start below, mirroring the TZ
++ * split between nspss_bring_up() (RST_EVB only) and nspss_dtb_bring_up()
++ * (QDSP6SS_BOOT_PARAMSi).
++ */
+ static TEE_Result nspss_fw_start(struct qcom_pas_data *data)
+ {
+ 	vaddr_t base = io_pa_or_va(&data->base, data->size);
++	vaddr_t pub = base + CDSP_QDSP6SS_PUB_OFFSET;
+ 
+-	/* Program firmware */
+-	io_write32(base + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
++	io_write32(pub + NSPSS_QDSP6SS_RST_EVB, data->fw_base >> 4);
+ 	dsb();
+ 
+ 	return TEE_SUCCESS;
+@@ -46,6 +64,57 @@ static TEE_Result nspss_fw_shutdown(struct qcom_pas_data *data)
+ 	return qcom_clock_pas_reset(data->clk_group);
+ }
+ 
++/*
++ * DTB companion boot routine, one per CDSP instance. The DTB subsystem is
++ * window-less (no data->base/size — see pas_platform_mem_setup()'s
++ * "window-less images" handling), so each instance maps the NSPSS block's
++ * PUB registers itself off its own raw physical base, matching the way TZ's
++ * nspss_dtb_bring_up() addresses its per-instance HWIO_OUTI() macros.
++ */
++static TEE_Result nspss_dtb_fw_start(struct qcom_pas_data *data,
++				     paddr_t nsp_base, size_t nsp_size)
++{
++	struct io_pa_va iopv = { .pa = nsp_base };
++	vaddr_t pub = io_pa_or_va(&iopv, nsp_size) + CDSP_QDSP6SS_PUB_OFFSET;
++
++	if (!data->fw_base || !data->fw_size)
++		return TEE_ERROR_BAD_PARAMETERS;
++
++	io_write32(pub + DTB_CONFIG_0_REG, (uint32_t)data->fw_base);
++	io_write32(pub + DTB_CONFIG_1_REG, (uint32_t)(data->fw_base >> 32));
++	io_write32(pub + DTB_CONFIG_2_REG, DTB_CHIP_FAMILY_ID);
++	io_write32(pub + DTB_CONFIG_3_REG, DTB_VERSION);
++	io_write32(pub + DTB_CONFIG_5_REG, (uint32_t)data->fw_size);
++	dsb();
++
++	return TEE_SUCCESS;
++}
++
++static TEE_Result nspss0_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return nspss_dtb_fw_start(data, CDSP_0_BASE, CDSP_0_SIZE);
++}
++
++static TEE_Result nspss1_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return nspss_dtb_fw_start(data, CDSP_1_BASE, CDSP_1_SIZE);
++}
++
++static TEE_Result nspss2_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return nspss_dtb_fw_start(data, CDSP_2_BASE, CDSP_2_SIZE);
++}
++
++static TEE_Result nspss3_dtb_fw_start(struct qcom_pas_data *data)
++{
++	return nspss_dtb_fw_start(data, CDSP_3_BASE, CDSP_3_SIZE);
++}
++
++static TEE_Result nspss_dtb_fw_shutdown(struct qcom_pas_data *data __unused)
++{
++	return TEE_SUCCESS;
++}
++
+ static TEE_Result nspss0_get_resource_table(struct resource_table *rt,
+ 					   size_t *rt_size)
+ {
+@@ -141,3 +210,23 @@ const struct qcom_pas_ops nspss3_ops = {
+ 	.fw_shutdown = nspss_fw_shutdown,
+ 	.get_resource_table = nspss3_get_resource_table,
+ };
++
++const struct qcom_pas_ops nspss0_dtb_ops = {
++	.fw_start = nspss0_dtb_fw_start,
++	.fw_shutdown = nspss_dtb_fw_shutdown,
++};
++
++const struct qcom_pas_ops nspss1_dtb_ops = {
++	.fw_start = nspss1_dtb_fw_start,
++	.fw_shutdown = nspss_dtb_fw_shutdown,
++};
++
++const struct qcom_pas_ops nspss2_dtb_ops = {
++	.fw_start = nspss2_dtb_fw_start,
++	.fw_shutdown = nspss_dtb_fw_shutdown,
++};
++
++const struct qcom_pas_ops nspss3_dtb_ops = {
++	.fw_start = nspss3_dtb_fw_start,
++	.fw_shutdown = nspss_dtb_fw_shutdown,
++};
+diff --git a/core/pta/qcom/pas/platform/nord/nspss.h b/core/pta/qcom/pas/platform/nord/nspss.h
+index 696d1ee5b..6bbedc7af 100644
+--- a/core/pta/qcom/pas/platform/nord/nspss.h
++++ b/core/pta/qcom/pas/platform/nord/nspss.h
+@@ -13,4 +13,9 @@ extern const struct qcom_pas_ops nspss1_ops;
+ extern const struct qcom_pas_ops nspss2_ops;
+ extern const struct qcom_pas_ops nspss3_ops;
+ 
++extern const struct qcom_pas_ops nspss0_dtb_ops;
++extern const struct qcom_pas_ops nspss1_dtb_ops;
++extern const struct qcom_pas_ops nspss2_dtb_ops;
++extern const struct qcom_pas_ops nspss3_dtb_ops;
++
+ #endif /* _NSPSS_H_ */
+diff --git a/core/pta/qcom/pas/platform/nord/subsys.c b/core/pta/qcom/pas/platform/nord/subsys.c
+index 53183e10b..84a9e12a0 100644
+--- a/core/pta/qcom/pas/platform/nord/subsys.c
++++ b/core/pta/qcom/pas/platform/nord/subsys.c
+@@ -24,6 +24,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &iris_ops,
+ 		.reset_seq = QCOM_PAS_RESET_NONE,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_TURING,
++			.clk_group = QCOM_CLKS_TURING,
++		},
++		.ops = &nspss0_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},	
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_TURING,
+@@ -34,6 +42,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &nspss0_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_TURING1,
++			.clk_group = QCOM_CLKS_TURING1,
++		},
++		.ops = &nspss1_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_TURING1,
+@@ -44,6 +60,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &nspss1_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_TURING2,
++			.clk_group = QCOM_CLKS_TURING2,
++		},
++		.ops = &nspss2_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_TURING2,
+@@ -54,6 +78,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &nspss2_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_TURING3,
++			.clk_group = QCOM_CLKS_TURING3,
++		},
++		.ops = &nspss3_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_TURING3,
+@@ -64,6 +96,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &nspss3_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_HPASS0,
++			.clk_group = QCOM_CLKS_HPASS0,
++		},
++		.ops = &hpass0_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_QDSP6,
+@@ -74,6 +114,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &hpass0_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_HPASS1,
++			.clk_group = QCOM_CLKS_HPASS1,
++		},
++		.ops = &hpass1_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_HPASS1,
+@@ -84,6 +132,14 @@ static struct qcom_pas_subsys subsystems[] = {
+ 		.ops = &hpass1_ops,
+ 		.reset_seq = QCOM_PAS_RESET_CLK_FULL,
+ 	},
++	{
++		.data = {
++			.pas_id = DTB_ID_HPASS2,
++			.clk_group = QCOM_CLKS_HPASS2,
++		},
++		.ops = &hpass2_dtb_ops,
++		.reset_seq = QCOM_PAS_RESET_CLK_ENABLE,
++	},
+ 	{
+ 		.data = {
+ 			.pas_id = PAS_ID_HPASS2,
+-- 
+2.34.1
+

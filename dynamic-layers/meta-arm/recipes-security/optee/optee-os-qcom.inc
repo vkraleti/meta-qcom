@@ -8,7 +8,13 @@ SRCREV_optee = "690842e042dc470bf0625eb77a8cab926c372a8f"
 
 # Nord Bringup specific
 PV:nord = "4.10.0-qcom-nord-20260919+git"
-SRC_URI:nord = "git://github.com/basantku/staging-optee_os.git;protocol=https;name=optee-nord;nobranch=1"
+SRC_URI:nord = " \
+    git://github.com/basantku/staging-optee_os.git;protocol=https;name=optee-nord;nobranch=1 \
+    file://0001-plat-qcom-nord-enable-HPASS0-2-NSPSS0-3-PAS-support.patch \
+    file://0002-plat-qcom-nord-enable-HPASS0-2-NSPSS0-3-DTB-PAS-supp.patch \
+    file://0003-plat-qcom-nord-clock-pas-id.patch \
+"
+
 SRCREV_optee-nord = "4bc075cced4c9bc0f588acf625eca2dfd951f28f"
 
 # Copy of do_deploy from meta-arm until we get it fixed to support configurable deploy dir
