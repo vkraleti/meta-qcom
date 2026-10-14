@@ -512,6 +512,14 @@ jobs:
                 type: default
                 dirname: ""
                 yamlfile: ""
+          - machine: nord-rrd-open-fw
+            distro:
+                name: qcom-distro-kvm
+                yamlfile: ':ci/qcom-distro-kvm.yml'
+            kernel:
+                type: default
+                dirname: ""
+                yamlfile: ""
           - machine: rb3gen2-core-kit
             distro:
                 name: nodistro
