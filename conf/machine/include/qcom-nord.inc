@@ -15,3 +15,18 @@ MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS += " \
 MACHINE_EXTRA_RRECOMMENDS += " \
     packagegroup-qcom-boot-additional \
 "
+
+# Memory layout needed by the SPL FIT boot flow.
+UBOOT_FIT_ARM_TRUSTED_FIRMWARE_LOADADDRESS ?= "0xBC300000"
+UBOOT_FIT_ARM_TRUSTED_FIRMWARE_ENTRYPOINT ?= "0xBC300000"
+UBOOT_FIT_TEE_LOADADDRESS ?= "0xBC600000"
+UBOOT_FIT_TEE_ENTRYPOINT ?= "0xBC600000"
+UBOOT_FIT_UBOOT_LOADADDRESS ?= "0xD8D00000"
+UBOOT_FIT_UBOOT_ENTRYPOINT ?= "0xD8D00000"
+
+# Recipes providing BL31 and OP-TEE for the FIT.
+QCOM_UBOOT_SPL_FIT_ATF ?= "trusted-firmware-a-qcom-nord"
+QCOM_UBOOT_SPL_FIT_TEE ?= "optee-os-qcom-nord"
+
+# The Nord SPL loads a FIT with extra image data.
+SPL_MKIMAGE_ARGS ?= "-E"
