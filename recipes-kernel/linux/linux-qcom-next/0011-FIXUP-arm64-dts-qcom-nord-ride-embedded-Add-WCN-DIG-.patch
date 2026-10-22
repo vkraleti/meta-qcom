@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yu Zhang(Yuriy) <yu.zhang@oss.qualcomm.com>
+Date: Tue, 14 Oct 2026 11:00:00 -0700
+Subject: [PATCH] FIXUP: arm64: dts: qcom: nord-ride-embedded: Add WCN DIG
+ rail on GPIO7
+
+Per the Ride Embedded schematic, PMIC E GPIO7 enables a 1.9V rail (1.8-2.1V range)
+that feeds the WCN7850 VDD_DIG domain. Describe that rail and point
+vdddig-supply at it so the power sequencer enables it as part of the
+WLAN power-up, instead of sharing the 0.95V core rail.
+
+Signed-off-by: Yu Zhang(Yuriy) <yu.zhang@oss.qualcomm.com>
+Upstream-Status: Submitted [https://lore.kernel.org/all/20261021022921.2053957-5-shengchao.guo@oss.qualcomm.com/]
+---
+ arch/arm64/boot/dts/qcom/nord-ride-embedded.dts | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts b/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
+--- a/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
++++ b/arch/arm64/boot/dts/qcom/nord-ride-embedded.dts
+@@ -83,6 +83,15 @@
+ 		enable-active-high;
+ 	};
+
++	vreg_wcn_1p9: regulator-wcn-1p9 {
++		compatible = "regulator-fixed";
++		regulator-name = "vreg_wcn_1p9";
++		regulator-min-microvolt = <1900000>;
++		regulator-max-microvolt = <1900000>;
++		gpio = <&pmau0102_e_gpios 7 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++	};
++
+ 	vreg_wcn_core_vl_0p95: regulator-wcn-core-vl-0p95 {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "vreg_wcn_core_vl_0p95";
+@@ -118,7 +127,7 @@
+ 		vdd-supply = <&vreg_wcn_3p3>;
+ 		vddio-supply = <&vreg_s3a_1p8>;
+ 		vddaon-supply = <&vreg_wcn_core_vl_0p95>;
+-		vdddig-supply = <&vreg_wcn_core_vl_0p95>;
++		vdddig-supply = <&vreg_wcn_1p9>;
+ 		vddrfa1p2-supply = <&vreg_wcn_core_vm_1p35>;
+ 		vddrfa1p8-supply = <&vreg_wcn_core_vh_1p95>;
+ 
+--
+2.34.1

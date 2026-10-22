@@ -13,4 +13,5 @@ SRC_URI:append:nord = " \
     file://0008-FROMGIT-ASoC-qcom-Add-QAIF-AIF-MI2S-and-TDM-DAI-supp.patch \
     file://0009-FIXUP-arm64-dts-qcom-nord-Add-missing-vmids-for-adsp.patch \
     file://0010-PENDING-arm64-dts-qcom-nord-Fix-iris-AXI-clock-assig.patch \
+    file://0011-FIXUP-arm64-dts-qcom-nord-ride-embedded-Add-WCN-DIG-.patch \
 "
