@@ -7,11 +7,16 @@ DEPENDS += "bc-native dtc-native gnutls-native python3-pyelftools-native qtestsi
 QCOM_UBOOT_SPL_FIT ?= "0"
 QCOM_UBOOT_SPL_FIT_ATF ?= ""
 QCOM_UBOOT_SPL_FIT_TEE ?= ""
+QCOM_UBOOT_SPL_FIT_TZ_AC_CONFIG ?= ""
 QCOM_UBOOT_SPL_FIT_EXTRA_LOADABLES ?= ""
 QCOM_UBOOT_SPL_FIT_XBL_SEC ?= ""
 
 # BL31 and OP-TEE go into the FIT, swiv annotates the SPL before signing.
 DEPENDS += "${@bb.utils.contains('QCOM_UBOOT_SPL_FIT', '1', '${QCOM_UBOOT_SPL_FIT_ATF} ${QCOM_UBOOT_SPL_FIT_TEE} swiv-build-utility-native', '', d)}"
+
+# tz_ac_config.bin, when set, is deployed rather than sysroot-staged, so pull
+# it in via a task dependency instead of DEPENDS.
+do_compile[depends] += "${@'%s:do_deploy' % d.getVar('QCOM_UBOOT_SPL_FIT_TZ_AC_CONFIG') if d.getVar('QCOM_UBOOT_SPL_FIT') == '1' and d.getVar('QCOM_UBOOT_SPL_FIT_TZ_AC_CONFIG') else ''}"
 
 # QCOM_UBOOT_SPL_FIT_EXTRA_LOADABLES is a space-separated list of
 # "recipe:filename" entries for further blobs (PMIC/DCB configs, SHRM,
@@ -75,6 +80,9 @@ uboot_compile_config:append() {
             fit_extra_loadable_file="${fit_extra_loadable#*:}"
             install -m 0644 ${DEPLOY_DIR_IMAGE}/${QCOM_BOOT_FILES_SUBDIR}/${fit_extra_loadable_file} ${B}/${builddir}/${fit_extra_loadable_file}
         done
+        if [ -n "${QCOM_UBOOT_SPL_FIT_TZ_AC_CONFIG}" ]; then
+            install -m 0644 ${DEPLOY_DIR_IMAGE}/${QCOM_BOOT_FILES_SUBDIR}/tz_ac_config.bin ${B}/${builddir}/tz_ac_config.bin
+        fi
     elif [ -n "${config_mbn_header}" ]; then
         export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
         qtestsign -${config_mbn_header} aboot -o ${B}/${builddir}/u-boot.mbn ${B}/${builddir}/u-boot.elf
