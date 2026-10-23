@@ -20,6 +20,7 @@ DEPENDS = "u-boot-tools-native"
 S = "${UNPACKDIR}"
 
 do_compile[depends] += " \
+    firmware-qcom-boot-nord:do_deploy \
     trusted-firmware-a-qcom-nord:do_deploy \
     optee-os-qcom-nord:do_deploy \
     u-boot-qcom:do_deploy \
@@ -36,6 +37,8 @@ do_compile() {
         "${FITIMAGE_STAGING_DIR}/bl31.bin"
     install -m 0644 "${DEPLOY_DIR_IMAGE}/optee-nord/tee-raw.bin" \
         "${FITIMAGE_STAGING_DIR}/tee-raw.bin"
+    install -m 0644 "${DEPLOY_DIR_IMAGE}/nord/tz_ac_config.bin" \
+        "${FITIMAGE_STAGING_DIR}/tz_ac_config.bin"
     install -m 0644 "${DEPLOY_DIR_IMAGE}/u-boot.bin" \
         "${FITIMAGE_STAGING_DIR}/u-boot.bin"
     install -m 0644 "${S}/tfa-optee-uboot-spl.its" \
