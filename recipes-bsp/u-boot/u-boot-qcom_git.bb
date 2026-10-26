@@ -1,5 +1,6 @@
 require recipes-bsp/u-boot/u-boot-common.inc
 require recipes-bsp/u-boot/u-boot.inc
+require recipes-bsp/u-boot/u-boot-qcom-spl-fit.inc
 
 DEPENDS += "bc-native dtc-native gnutls-native python3-pyelftools-native qtestsign-native xxd-native"
 
