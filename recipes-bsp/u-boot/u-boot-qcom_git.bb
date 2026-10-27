@@ -104,7 +104,7 @@ uboot_assemble_fitimage_helper:append() {
             qtestsign -${mbn_header} tz -o u-boot-spl.mbn u-boot-spl-swiv.elf
             rm -f u-boot-spl-swiv.elf
         else
-            qtestsign -${mbn_header} ${QCOM_SPL_FW_TYPE} -o u-boot-spl.mbn spl/u-boot-spl.elf
+            qtestsign -${mbn_header} ${QCOM_SPL_FW_TYPE} -o u-boot-spl.mbn spl/u-boot-spl.wrap-elf
         fi
     fi
 }
