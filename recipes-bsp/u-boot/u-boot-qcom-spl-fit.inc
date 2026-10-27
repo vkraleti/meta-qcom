@@ -422,3 +422,211 @@ EOF
         };
 EOF
 }
+
+# Create a ITS file for the TZ Access Control Config blob (nord)
+uboot_fitimage_tz_ac_config() {
+	cat << EOF >> ${UBOOT_ITS}
+        tz_ac_config {
+            description = "TZ Access Control Config";
+            data = /incbin/("${UBOOT_FIT_TZ_AC_CONFIG_IMAGE}");
+            type = "tee";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_TZ_AC_CONFIG_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_TZ_AC_CONFIG_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for the PMIC Cocos config (shikra)
+uboot_fitimage_pmic_cocos() {
+	cat << EOF >> ${UBOOT_ITS}
+        pmic_cocos {
+            description = "PMIC Cocos Config";
+            data = /incbin/("${UBOOT_FIT_PMIC_COCOS_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_PMIC_COCOS_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_PMIC_COCOS_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for the PMIC Wailua config (shikra)
+uboot_fitimage_pmic_wailua() {
+	cat << EOF >> ${UBOOT_ITS}
+        pmic_wailua {
+            description = "PMIC Wailua Config";
+            data = /incbin/("${UBOOT_FIT_PMIC_WAILUA_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_PMIC_WAILUA_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_PMIC_WAILUA_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for the DDR Config Block, LP4 variant (shikra)
+uboot_fitimage_dcb_lp4() {
+	cat << EOF >> ${UBOOT_ITS}
+        dcb_lp4 {
+            description = "DDR Config Block (LP4)";
+            data = /incbin/("${UBOOT_FIT_DCB_LP4_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_DCB_LP4_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_DCB_LP4_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for the DDR Config Block, LP5 variant (shikra)
+uboot_fitimage_dcb_lp5() {
+	cat << EOF >> ${UBOOT_ITS}
+        dcb_lp5 {
+            description = "DDR Config Block (LP5)";
+            data = /incbin/("${UBOOT_FIT_DCB_LP5_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_DCB_LP5_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_DCB_LP5_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for SHRM (shikra)
+uboot_fitimage_shrm() {
+	cat << EOF >> ${UBOOT_ITS}
+        shrm {
+            description = "SHRM";
+            data = /incbin/("${UBOOT_FIT_SHRM_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_SHRM_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_SHRM_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for QcLib (shikra)
+uboot_fitimage_qclib() {
+	cat << EOF >> ${UBOOT_ITS}
+        qclib {
+            description = "QcLib";
+            data = /incbin/("${UBOOT_FIT_QCLIB_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_QCLIB_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_QCLIB_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
+
+# Create a ITS file for the ECC config (shikra)
+uboot_fitimage_ecc() {
+	cat << EOF >> ${UBOOT_ITS}
+        ecc {
+            description = "ECC Config";
+            data = /incbin/("${UBOOT_FIT_ECC_IMAGE}");
+            type = "firmware";
+            arch = "${UBOOT_ARCH}";
+            compression = "none";
+            load = <${UBOOT_FIT_ECC_LOADADDRESS}>;
+            entry = <${UBOOT_FIT_ECC_ENTRYPOINT}>;
+EOF
+	if [ "${SPL_SIGN_ENABLE}" = "1" ] ; then
+		cat << EOF >> ${UBOOT_ITS}
+            signature {
+                algo = "${UBOOT_FIT_HASH_ALG},${UBOOT_FIT_SIGN_ALG}";
+                key-name-hint = "${SPL_SIGN_KEYNAME}";
+            };
+EOF
+	fi
+
+	cat << EOF >> ${UBOOT_ITS}
+        };
+EOF
+}
