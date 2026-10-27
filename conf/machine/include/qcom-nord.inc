@@ -35,16 +35,4 @@ QCOM_UBOOT_SPL_FIT_TEE ?= "optee-os-qcom-nord"
 # and loaded by the SPL alongside BL31/OP-TEE/U-Boot.
 QCOM_UBOOT_SPL_FIT_TZ_AC_CONFIG ?= "firmware-qcom-boot-nord"
 
-UBOOT_FIT_USER_SETTINGS ?= "\
-    tz_ac_config {\n\
-        description = \"TZ Access Control Config\";\n\
-        data = /incbin/(\"tz_ac_config.bin\");\n\
-        type = \"tee\";\n\
-        arch = \"${UBOOT_ARCH}\";\n\
-        compression = \"none\";\n\
-        load = <${UBOOT_FIT_TZ_AC_CONFIG_LOADADDRESS}>;\n\
-        entry = <${UBOOT_FIT_TZ_AC_CONFIG_ENTRYPOINT}>;\n\
-    };\n\
-"
-
-UBOOT_FIT_CONF_USER_LOADABLES ?= ', \"tz_ac_config\"'
+UBOOT_FIT_TZ_AC_CONFIG = "1"
