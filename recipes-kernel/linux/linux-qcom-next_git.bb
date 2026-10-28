@@ -32,6 +32,9 @@ SRC_URI = "git://github.com/qualcomm-linux/kernel.git;${SRCBRANCH};protocol=http
 # Additional kernel configs.
 SRC_URI += " \
     file://configs/bsp-additions.cfg \
+    file://0001-FIXUP-ASoC-qcom-sc8280xp-fix-audio-capture-issue.patch \
+    file://0002-FIXUP-arm64-dts-qcom-nord-ride-embedded-Fix-Audio-ca.patch \
+    file://0003-FROMLIST-arm64-dts-qcom-nord-embedded-Raise-i2c18-pa.patch \
 "
 
 # To build tip of qcom-next branch set preferred

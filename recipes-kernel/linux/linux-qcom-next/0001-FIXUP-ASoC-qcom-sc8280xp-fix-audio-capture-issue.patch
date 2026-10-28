@@ -1,0 +1,196 @@
+From 956e17a5cd3d9b86d4c1ebb10ac83fa115061a38 Mon Sep 17 00:00:00 2001
+From: Mohammad Rafi Shaik <mohammad.rafi.shaik@oss.qualcomm.com>
+Date: Tue, 13 Oct 2026 11:53:52 +0530
+Subject: [PATCH 1/3] FIXUP: ASoC: qcom: sc8280xp: fix audio capture issue
+
+Backport the topic branch fixes for audio capture. Audio V2 includes
+new upstream changes, including updating the DAI IDs to QAIF DAI IDs
+and moving the audio codec configuration to hw_params() instead of
+performing it during early initialization.
+
+Upstream-Status: Submitted [https://lore.kernel.org/all/20261009-nord-asoc-driver-support-v3-v3-0-0c1897f21ccf@oss.qualcomm.com/]
+Signed-off-by: Mohammad Rafi Shaik <mohammad.rafi.shaik@oss.qualcomm.com>
+---
+ sound/soc/codecs/pcm1681.c |  8 +++--
+ sound/soc/qcom/sc8280xp.c  | 68 +++++++++++++++++---------------------
+ 2 files changed, 37 insertions(+), 39 deletions(-)
+
+diff --git a/sound/soc/codecs/pcm1681.c b/sound/soc/codecs/pcm1681.c
+index cfe549176d14..605ea8d55669 100644
+--- a/sound/soc/codecs/pcm1681.c
++++ b/sound/soc/codecs/pcm1681.c
+@@ -46,7 +46,7 @@ static const struct reg_default pcm1681_reg_defaults[] = {
+ 	{ 0x06,	0xff },
+ 	{ 0x07,	0x00 },
+ 	{ 0x08,	0x00 },
+-	{ 0x09,	0x06 },
++	{ 0x09,	0x05 },
+ 	{ 0x0A,	0x00 },
+ 	{ 0x0B,	0xff },
+ 	{ 0x0C,	0x0f },
+@@ -189,6 +189,9 @@ static int pcm1681_hw_params(struct snd_pcm_substream *substream,
+ 	case SND_SOC_DAIFMT_LEFT_J:
+ 		val = 0x05;
+ 		break;
++	case SND_SOC_DAIFMT_DSP_A:
++		val = 0x06;
++		break;
+ 	default:
+ 		dev_err(component->dev, "Invalid DAI format\n");
+ 		return -EINVAL;
+@@ -204,7 +207,8 @@ static int pcm1681_hw_params(struct snd_pcm_substream *substream,
+ static const u64 pcm1681_selectable_formats =
+ 	SND_SOC_POSSIBLE_DAIFMT_I2S	|
+ 	SND_SOC_POSSIBLE_DAIFMT_RIGHT_J	|
+-	SND_SOC_POSSIBLE_DAIFMT_LEFT_J;
++	SND_SOC_POSSIBLE_DAIFMT_LEFT_J |
++	SND_SOC_POSSIBLE_DAIFMT_DSP_A;
+ 
+ static const struct snd_soc_dai_ops pcm1681_dai_ops = {
+ 	.set_fmt	= pcm1681_set_dai_fmt,
+diff --git a/sound/soc/qcom/sc8280xp.c b/sound/soc/qcom/sc8280xp.c
+index bfdca7a860d0..40c8eb0fd467 100644
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -18,7 +18,6 @@
+ #include "common.h"
+ #include "sdw.h"
+ 
+-#define LRCLK_SYSCLK 1
+ #define I2S_MCLKFS 256
+ 
+ #define I2S_MCLK_RATE(rate) \
+@@ -26,6 +25,10 @@
+ #define I2S_BIT_RATE(rate, channels, format) \
+ 	((rate) * (channels) * (format))
+ 
++#define ADAU1977_SYSCLK 0
++#define ADAU1977_SYSCLK_SRC_MCLK 0
++#define ADAU1977_SYSCLK_SRC_LRCLK 1
++
+ static struct snd_soc_dapm_widget sc8280xp_dapm_widgets[] = {
+ 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+ 	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+@@ -109,9 +112,8 @@ struct qcom_snd_soc_common {
+ 	bool mi2s_mclk_enable;
+ 	bool mi2s_bclk_enable;
+ 	bool wcd_jack;
++	int (*snd_init)(struct snd_soc_pcm_runtime *rtd);
+ 	int (*snd_prepare)(struct snd_pcm_substream *substream);
+-	int (*snd_hw_params)(struct snd_pcm_substream *substream,
+-			     struct snd_pcm_hw_params *params);
+ };
+ 
+ struct sc8280xp_snd_data {
+@@ -225,6 +227,13 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
+ 	struct snd_soc_card *card = rtd->card;
+ 	struct snd_soc_jack *dp_jack  = NULL;
+ 	int dp_pcm_id = 0;
++	int ret;
++
++	if (data->priv->snd_init) {
++		ret = data->priv->snd_init(rtd);
++		if (ret)
++			return ret;
++	}
+ 
+ 	switch (cpu_dai->id) {
+ 	case WSA_CODEC_DMA_RX_0:
+@@ -291,43 +300,31 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+ 	return 0;
+ }
+ 
+-static int nord_snd_hw_params(struct snd_pcm_substream *substream,
+-			      struct snd_pcm_hw_params *params)
++static int nord_snd_init(struct snd_soc_pcm_runtime *rtd)
+ {
+-	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+ 	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+ 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+-	int rate = params_rate(params);
+ 	int ret;
+ 
+ 	switch (cpu_dai->id) {
+-	case TERTIARY_MI2S_RX:
+-		ret = snd_soc_dai_set_fmt(codec_dai,
+-					  SND_SOC_DAIFMT_CBC_CFC |
+-					  SND_SOC_DAIFMT_NB_NF |
+-					  SND_SOC_DAIFMT_I2S);
+-		if (ret && ret != -ENOTSUPP)
+-			return ret;
+-
+-		break;
+-	case TERTIARY_TDM_TX_7:
+-		ret = snd_soc_dai_set_fmt(codec_dai,
+-					  SND_SOC_DAIFMT_CBC_CFC |
+-					  SND_SOC_DAIFMT_NB_NF |
+-					  SND_SOC_DAIFMT_DSP_A);
+-		if (ret && ret != -ENOTSUPP)
+-			return ret;
+-
+-		/* adau1979 MCLK sourced from LRCLK */
++	case AIF_TDM_TX_8:
++		/*
++		 * adau1979 PLL clocked from LRCLK, no external MCLK. Selecting
++		 * the source also installs the PLL rate constraint, which the
++		 * codec applies from its startup() callback, so it has to be
++		 * in place before the first stream is opened. The frequency is
++		 * unused for an LRCLK-sourced PLL.
++		 */
+ 		ret = snd_soc_component_set_sysclk(codec_dai->component,
+-						   0, LRCLK_SYSCLK,
+-						   rate, SND_SOC_CLOCK_IN);
++						   ADAU1977_SYSCLK,
++						   ADAU1977_SYSCLK_SRC_LRCLK,
++						   48000, SND_SOC_CLOCK_IN);
+ 		if (ret && ret != -ENOTSUPP)
+ 			return ret;
+ 		break;
+ 	default:
+ 		break;
+-	};
++	}
+ 
+ 	return 0;
+ }
+@@ -343,12 +340,6 @@ static int sc8280xp_snd_hw_params(struct snd_pcm_substream *substream,
+ 	int bclk_freq = sc8280xp_get_bclk_freq(params);
+ 	int ret;
+ 
+-	if (data->priv->snd_hw_params) {
+-		ret = data->priv->snd_hw_params(substream, params);
+-		if (ret)
+-			return ret;
+-	}
+-
+ 	switch (cpu_dai->id) {
+ 	case PRIMARY_MI2S_RX ... QUATERNARY_MI2S_TX:
+ 	case QUINARY_MI2S_RX ... QUINARY_MI2S_TX:
+@@ -572,10 +563,13 @@ static const struct qcom_snd_soc_common maili_priv_data = {
+ 	.wcd_jack = true,
+ };
+ 
+-static const struct qcom_snd_soc_common nord_ride_priv_data = {
++static const struct qcom_snd_soc_common nord_priv_data = {
+ 	.driver_name = "nord",
+ 	.mi2s_bclk_enable = true,
+-	.snd_hw_params = nord_snd_hw_params,
++	.codec_dai_fmt = SND_SOC_DAIFMT_CBC_CFC |
++			 SND_SOC_DAIFMT_NB_NF |
++			 SND_SOC_DAIFMT_DSP_A,
++	.snd_init = nord_snd_init,
+ };
+ 
+ static const struct qcom_snd_soc_common qcs9100_priv_data = {
+@@ -723,7 +717,7 @@ static const struct of_device_id snd_sc8280xp_dt_match[] = {
+ 	{ .compatible = "qcom,hawi-sndcard", .data = &hawi_priv_data },
+ 	{ .compatible = "qcom,kaanapali-sndcard", .data = &kaanapali_priv_data },
+ 	{ .compatible = "qcom,maili-sndcard", .data = &maili_priv_data },
+-	{ .compatible = "qcom,nord-ride-sndcard", .data = &nord_ride_priv_data },
++	{ .compatible = "qcom,nord-sndcard", .data = &nord_priv_data },
+ 	{ .compatible = "qcom,qcm6490-idp-sndcard", .data = &qcm6490_priv_data },
+ 	{ .compatible = "qcom,qcs615-sndcard", .data = &qcs615_priv_data },
+ 	{ .compatible = "qcom,qcs6490-rb3gen2-sndcard", .data = &qcs6490_priv_data },
+-- 
+2.34.1
+

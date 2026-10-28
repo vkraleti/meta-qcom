@@ -1,0 +1,54 @@
+From 4823d73074a6bdfe2db83cd0fcd64d30a465e3ab Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Date: Wed, 28 Oct 2026 11:28:34 +0530
+Subject: [PATCH 3/3] FROMLIST: arm64: dts: qcom: nord-embedded: Raise i2c18
+ pad drive strength
+
+The i2c18 pins (gpio154/155) are configured for 2 mA. That is not
+enough on nord-ride-embedded, where i2c18 is the audio control bus
+carrying the TCA6408 expander, ADAU1979 ADC and PCM1681 DAC behind
+TXS0102 level shifters. Transfers intermittently fail with arbitration
+loss and unexpected start/stop conditions:
+
+  geni_i2c 890000.i2c: Bus arbitration lost, clock line undriveable
+  geni_i2c 890000.i2c: Bus proto err, noisy/unexpected start/stop
+  adau1977 0-0031: probe with driver adau1977 failed with error -11
+  reg-fixed-voltage regulator-5p0-dac: setup of GPIO (default) failed: -11
+
+The failure became much more frequent with commit 8cb5c17
+("i2c: qcom-geni: Restore the source-clock selection policy"), which
+moves the i2c18 serial engine clock from 32 MHz to 19.2 MHz. That
+commit only changes how often the marginal signalling shows up:
+reverting it, or lowering the bus to 100 kHz, still leaves occasional
+failures in a codec unbind/bind loop. With 4 mA the loop passes
+reliably at either source clock rate.
+
+nord-rrd uses the same level shifters and has not shown the failure
+at 2 mA, but that appears to be margin rather than a guarantee. Since
+this audio I2C arrangement is the reference design that customer
+boards will likely follow, raise the default in the shared dtsi
+instead of overriding it per board.
+
+Signed-off-by: Shawn Guo <shengchao.guo@oss.qualcomm.com>
+Signed-off-by: Mohammad Rafi Shaik <mohammad.rafi.shaik@oss.qualcomm.com>
+Upstream-Status: Submitted [https://lore.kernel.org/r/20261021073633.2163128-4-shengchao.guo@oss.qualcomm.com]
+---
+ arch/arm64/boot/dts/qcom/nord-embedded.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+index 9060895c175b..a604c04722ea 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-embedded.dtsi
+@@ -3400,7 +3400,7 @@ qup_i2c17_default: qup-i2c17-default-state {
+ 	qup_i2c18_default: qup-i2c18-default-state {
+ 		pins = "gpio154", "gpio155";
+ 		function = "qup2_se4";
+-		drive-strength = <2>;
++		drive-strength = <4>;
+ 		bias-pull-up;
+ 	};
+ 
+-- 
+2.34.1
+
