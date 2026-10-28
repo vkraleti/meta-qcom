@@ -1,0 +1,100 @@
+From 4ef67ad16cbeb998b03cac966aad49e584491150 Mon Sep 17 00:00:00 2001
+From: Ignatius Michael Jihan <mignatiu@qti.qualcomm.com>
+Date: Mon, 26 Oct 2026 16:33:52 +0530
+Subject: [PATCH] QCLINUX: arm64: dts: qcom: nord: Add CAMX EL2 DTB support
+
+Add DTB build targets for Nord RRD and RIDE Embedded CAMX EL2
+configurations. The new DTBs combine the base platform DTB with EL2,
+CAMX, and CAMX EL2 overlays.
+
+Also add fw-pas-id = <50> for ICP1 to enable secure firmware loading
+through the PAS framework.
+
+Signed-off-by: Ignatius Michael Jihan <mignatiu@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/Makefile           |  8 +++++
+ arch/arm64/boot/dts/qcom/nord-camera.dtsi   |  1 +
+ arch/arm64/boot/dts/qcom/nord-camx-el2.dtso | 34 +++++++++++++++++++++
+ 3 files changed, 43 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/qcom/nord-camx-el2.dtso
+
+diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+index 81f8d3873199..d193c26e82ad 100644
+--- a/arch/arm64/boot/dts/qcom/Makefile
++++ b/arch/arm64/boot/dts/qcom/Makefile
+@@ -678,11 +678,19 @@ nord-ride-embedded-camx-dtbs := nord-ride-embedded.dtb nord-ride-embedded-camx.d
+ dtb-$(CONFIG_ARCH_QCOM)   += nord-ride-embedded-camx.dtb
+ dtb-$(CONFIG_ARCH_QCOM)   += nord-ride-embedded-camx.dtbo
+ 
++nord-ride-embedded-camx-el2-dtbs	:= nord-ride-embedded.dtb nord-embedded-el2.dtbo nord-ride-embedded-camx.dtbo nord-camx-el2.dtbo
++
++dtb-$(CONFIG_ARCH_QCOM)	+= nord-ride-embedded-camx-el2.dtb
++
+ nord-rrd-camx-dtbs        := nord-rrd.dtb nord-rrd-camx.dtbo
+ 
+ dtb-$(CONFIG_ARCH_QCOM)   += nord-rrd-camx.dtb
+ dtb-$(CONFIG_ARCH_QCOM)   += nord-rrd-camx.dtbo
+ 
++nord-rrd-camx-el2-dtbs	:= nord-rrd.dtb nord-embedded-el2.dtbo nord-rrd-camx.dtbo nord-camx-el2.dtbo
++
++dtb-$(CONFIG_ARCH_QCOM)	+= nord-rrd-camx-el2.dtb
++
+ purwa-evk-camx-dtbs     := purwa-iot-evk.dtb purwa-evk-camx.dtbo
+ 
+ dtb-$(CONFIG_ARCH_QCOM)	+= purwa-evk-camx.dtb
+diff --git a/arch/arm64/boot/dts/qcom/nord-camera.dtsi b/arch/arm64/boot/dts/qcom/nord-camera.dtsi
+index 9c00bb8954f3..5f98909efba9 100644
+--- a/arch/arm64/boot/dts/qcom/nord-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/nord-camera.dtsi
+@@ -836,6 +836,7 @@ cam_icp1: qcom,icp1@9a14000 {
+ 		operating-points-v2 = <&icp1_opp_table>;
+ 		icp-version = <0x0300>;
+ 		cam_hw_pid = <15>;
++		fw-pas-id = <50>;
+ 		cell-index = <1>;
+ 		status = "okay";
+ 
+diff --git a/arch/arm64/boot/dts/qcom/nord-camx-el2.dtso b/arch/arm64/boot/dts/qcom/nord-camx-el2.dtso
+new file mode 100644
+index 000000000000..b46e95a28948
+--- /dev/null
++++ b/arch/arm64/boot/dts/qcom/nord-camx-el2.dtso
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++/dts-v1/;
++/plugin/;
++
++/ {
++	fragment@0 {
++		target-path = "/soc@0/qcom,cam-cpas@9a01000";
++		__overlay__ {
++			enable-secure-qos-update = <0>;
++		};
++	};
++
++	fragment@1 {
++		target-path = "/soc@0/qcom,cam-icp0";
++		__overlay__ {
++			camera-firmware {
++				iommus = <&apps_smmu_1 0x08c1 0x0>;
++			};
++		};
++	};
++
++	fragment@2 {
++		target-path = "/soc@0/qcom,cam-icp1";
++		__overlay__ {
++			camera-firmware {
++				iommus = <&apps_smmu_1 0x0981 0x0>;
++			};
++		};
++	};
++};
+-- 
+2.43.0
+

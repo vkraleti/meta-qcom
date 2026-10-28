@@ -1,0 +1,33 @@
+From 1382f749615422d09e0a8a16f0d5ce96c91de6a2 Mon Sep 17 00:00:00 2001
+From: Gourav Kumar <gourav.kumar@oss.qualcomm.com>
+Date: Fri, 23 Oct 2026 17:28:25 +0530
+Subject: [PATCH 1/2] PENDING: arm64: dts: qcom: nord: Add EL2 support for Iris
+
+Add support for IRIS on nord when Linux host running at EL2.
+
+Signed-off-by: Gourav Kumar <gourav.kumar@oss.qualcomm.com>
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/nord-embedded-el2.dtso | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-embedded-el2.dtso b/arch/arm64/boot/dts/qcom/nord-embedded-el2.dtso
+index 1ea08269e9aa..54c7fa52fb39 100644
+--- a/arch/arm64/boot/dts/qcom/nord-embedded-el2.dtso
++++ b/arch/arm64/boot/dts/qcom/nord-embedded-el2.dtso
+@@ -6,6 +6,12 @@
+ /dts-v1/;
+ /plugin/;
+ 
++&iris {
++	video-firmware {
++		iommus = <&apps_smmu_1 0x0962 0x0000>;
++	};
++};
++
+ &remoteproc_adsp {
+ 	iommus = <&apps_smmu_0 0x09e0 0x0>;
+ };
+-- 
+2.43.0
+
