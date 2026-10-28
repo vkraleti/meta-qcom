@@ -1,0 +1,186 @@
+From d0e57ef1fcd35fc6c70a7c9eec2d9f0b52153bb4 Mon Sep 17 00:00:00 2001
+From: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Date: Thu, 15 Oct 2026 14:48:38 +0530
+Subject: [PATCH 2/4] feat(drivers/qti) add rvbar config changes for nord
+
+Signed-off-by: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/qti/sec_core/kodiak/sec_core_cfg.c    | 11 ++++++
+ drivers/qti/sec_core/lemans/sec_core_cfg.c    | 11 ++++++
+ drivers/qti/sec_core/nord/sec_core_cfg.c      | 39 +++++++++++++++++++
+ drivers/qti/sec_core/sec_core.c               |  6 ++-
+ .../drivers/qti/sec_core/nord/sec_core_defs.h | 21 ++++++++++
+ include/drivers/qti/sec_core/sec_core.h       |  2 +
+ plat/qti/wildcat/nord/platform.mk             |  5 ++-
+ 7 files changed, 92 insertions(+), 3 deletions(-)
+ create mode 100644 drivers/qti/sec_core/nord/sec_core_cfg.c
+ create mode 100644 include/drivers/qti/sec_core/nord/sec_core_defs.h
+
+diff --git a/drivers/qti/sec_core/kodiak/sec_core_cfg.c b/drivers/qti/sec_core/kodiak/sec_core_cfg.c
+index 984c80591..5471451fc 100644
+--- a/drivers/qti/sec_core/kodiak/sec_core_cfg.c
++++ b/drivers/qti/sec_core/kodiak/sec_core_cfg.c
+@@ -44,3 +44,14 @@ const size_t qti_sec_core_cfg_count = ARRAY_SIZE(qti_sec_core_cfg);
+ 
+ const uintptr_t qti_sec_core_rvbaraddr_lo = APSS_SHARED_KRYO_RVBARADDR_LO_ADDR;
+ const uintptr_t qti_sec_core_rvbaraddr_hi = APSS_SHARED_KRYO_RVBARADDR_HI_ADDR;
++
++/*
++ * RVBAR address shift offsets for Kodiak.
++ * The LO register holds bits [33:2] of the physical address (addr >> 2).
++ * The HI register holds bits [65:34] of the physical address (addr >> 34).
++ */
++#define QTI_SEC_CORE_RVBARADDR_LO_SHIFT		(2U)
++#define QTI_SEC_CORE_RVBARADDR_HI_SHIFT		(34U)
++
++const unsigned int qti_sec_core_rvbaraddr_lo_shift = QTI_SEC_CORE_RVBARADDR_LO_SHIFT;
++const unsigned int qti_sec_core_rvbaraddr_hi_shift = QTI_SEC_CORE_RVBARADDR_HI_SHIFT;
+diff --git a/drivers/qti/sec_core/lemans/sec_core_cfg.c b/drivers/qti/sec_core/lemans/sec_core_cfg.c
+index 8d651d7a2..fbd0be38e 100644
+--- a/drivers/qti/sec_core/lemans/sec_core_cfg.c
++++ b/drivers/qti/sec_core/lemans/sec_core_cfg.c
+@@ -45,3 +45,14 @@ const size_t qti_sec_core_cfg_count = ARRAY_SIZE(qti_sec_core_cfg);
+ 
+ const uintptr_t qti_sec_core_rvbaraddr_lo = APSS_SHARED_KRYO_RVBARADDR_LO_ADDR;
+ const uintptr_t qti_sec_core_rvbaraddr_hi = APSS_SHARED_KRYO_RVBARADDR_HI_ADDR;
++
++/*
++ * RVBAR address shift offsets for Le Mans.
++ * The LO register holds bits [33:2] of the physical address (addr >> 2).
++ * The HI register holds bits [65:34] of the physical address (addr >> 34).
++ */
++#define QTI_SEC_CORE_RVBARADDR_LO_SHIFT		(2U)
++#define QTI_SEC_CORE_RVBARADDR_HI_SHIFT		(34U)
++
++const unsigned int qti_sec_core_rvbaraddr_lo_shift = QTI_SEC_CORE_RVBARADDR_LO_SHIFT;
++const unsigned int qti_sec_core_rvbaraddr_hi_shift = QTI_SEC_CORE_RVBARADDR_HI_SHIFT;
+diff --git a/drivers/qti/sec_core/nord/sec_core_cfg.c b/drivers/qti/sec_core/nord/sec_core_cfg.c
+new file mode 100644
+index 000000000..933f418af
+--- /dev/null
++++ b/drivers/qti/sec_core/nord/sec_core_cfg.c
+@@ -0,0 +1,39 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <drivers/qti/sec_core/sec_core.h>
++
++#include <sec_core_defs.h>
++
++/*
++ * Nord does not require any ACPS security register initialisation at boot.
++ * The qti_sec_core_init() loop is a no-op when qti_sec_core_cfg_count is 0.
++ */
++const struct sec_core_cfg_s qti_sec_core_cfg[0];
++const size_t qti_sec_core_cfg_count = 0U;
++
++/*
++ * NCC RVBAR register addresses for Nord.
++ * Taken from the NCC architecture register map.
++ */
++const uintptr_t qti_sec_core_rvbaraddr_lo = NCC0_NCC_NCC_ARCH_0_NCC_RVBAR_ADDR_LO;
++const uintptr_t qti_sec_core_rvbaraddr_hi = NCC0_NCC_NCC_ARCH_0_NCC_RVBAR_ADDR_HI;
++
++/*
++ * RVBAR address shift offsets for Nord.
++ * The NCC RVBAR registers on Nord store the full physical address split at
++ * the 32-bit boundary:
++ *   LO register: bits [31:0]  of the entrypoint address (addr >> 0)
++ *   HI register: bits [63:32] of the entrypoint address (addr >> 32)
++ */
++#define QTI_SEC_CORE_RVBARADDR_LO_SHIFT		(0U)
++#define QTI_SEC_CORE_RVBARADDR_HI_SHIFT		(32U)
++
++const unsigned int qti_sec_core_rvbaraddr_lo_shift = QTI_SEC_CORE_RVBARADDR_LO_SHIFT;
++const unsigned int qti_sec_core_rvbaraddr_hi_shift = QTI_SEC_CORE_RVBARADDR_HI_SHIFT;
+\ No newline at end of file
+diff --git a/drivers/qti/sec_core/sec_core.c b/drivers/qti/sec_core/sec_core.c
+index cb764a6ed..d1f583176 100644
+--- a/drivers/qti/sec_core/sec_core.c
++++ b/drivers/qti/sec_core/sec_core.c
+@@ -12,8 +12,10 @@
+ 
+ void qti_sec_core_remap(uintptr_t entrypoint)
+ {
+-	mmio_write_32(qti_sec_core_rvbaraddr_lo, (uint32_t)(entrypoint >> 2));
+-	mmio_write_32(qti_sec_core_rvbaraddr_hi, (uint32_t)(entrypoint >> 34));
++	mmio_write_32(qti_sec_core_rvbaraddr_lo,
++		      (uint32_t)(entrypoint >> qti_sec_core_rvbaraddr_lo_shift));
++	mmio_write_32(qti_sec_core_rvbaraddr_hi,
++		      (uint32_t)(entrypoint >> qti_sec_core_rvbaraddr_hi_shift));
+ }
+ 
+ /*
+diff --git a/include/drivers/qti/sec_core/nord/sec_core_defs.h b/include/drivers/qti/sec_core/nord/sec_core_defs.h
+new file mode 100644
+index 000000000..01989fbca
+--- /dev/null
++++ b/include/drivers/qti/sec_core/nord/sec_core_defs.h
+@@ -0,0 +1,21 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef NORD_SEC_CORE_DEFS_H
++#define NORD_SEC_CORE_DEFS_H
++
++/*
++ * NCC RVBAR address registers for Nord.
++ * These are the 32-bit register addresses used to program the reset vector
++ * base address for the NCC (Next-generation CPU Cluster) on Nord.
++ *
++ * The LO register receives bits [31:0] of the physical entrypoint address.
++ * The HI register receives bits [63:32] of the physical entrypoint address.
++ */
++#define NCC0_NCC_NCC_ARCH_0_NCC_RVBAR_ADDR_LO		(0x19880328UL)
++#define NCC0_NCC_NCC_ARCH_0_NCC_RVBAR_ADDR_HI		(0x1988032CUL)
++
++#endif /* NORD_SEC_CORE_DEFS_H */
+\ No newline at end of file
+diff --git a/include/drivers/qti/sec_core/sec_core.h b/include/drivers/qti/sec_core/sec_core.h
+index 89f80301c..a4904ad5f 100644
+--- a/include/drivers/qti/sec_core/sec_core.h
++++ b/include/drivers/qti/sec_core/sec_core.h
+@@ -22,5 +22,7 @@ extern const struct sec_core_cfg_s qti_sec_core_cfg[];
+ extern const size_t qti_sec_core_cfg_count;
+ extern const uintptr_t qti_sec_core_rvbaraddr_lo;
+ extern const uintptr_t qti_sec_core_rvbaraddr_hi;
++extern const unsigned int qti_sec_core_rvbaraddr_lo_shift;
++extern const unsigned int qti_sec_core_rvbaraddr_hi_shift;
+ 
+ #endif /* SEC_CORE_H */
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 8b2b7dece..0021db064 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -112,6 +112,7 @@ QTI_EXTERNAL_INCLUDES	:=	-I${QTI_PLAT_PATH}/${CHIPSET}/inc			\
+ 				-I${PLAT_QTI_ROOT}/cpu/inc				\
+ 				-I${QTI_PLAT_PATH}/bl31qtilib/inc			\
+ 				-I${PLAT_QTI_ROOT}/common/inc				\
++				-Iinclude/drivers/qti/sec_core/${CHIPSET}		\
+ 
+ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+ 				$(PLAT_QTI_ROOT)/common/src/$(ARCH)/qti_uart_console.S	\
+@@ -134,7 +135,9 @@ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+ 				$(PLAT_QTI_ROOT)/common/src/spmi_arb.c			\
+ 				$(QTI_PLAT_PATH)/bl31qtilib/src/bl31qtilib_cb_interface.c	\
+ 				$(QTI_PLAT_PATH)/common/src/qti_plat_helpers.c \
+-				drivers/qti/crypto/rng.c
++				drivers/qti/crypto/rng.c \
++				drivers/qti/sec_core/sec_core.c 			\
++				drivers/qti/sec_core/${CHIPSET}/sec_core_cfg.c 		\
+ 
+ 
+ # Ensure Widevine is not being used
+-- 
+2.43.0
+

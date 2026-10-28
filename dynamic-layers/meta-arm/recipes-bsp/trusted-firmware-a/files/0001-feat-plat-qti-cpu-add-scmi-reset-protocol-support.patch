@@ -1,0 +1,847 @@
+From 3882a9b3db63aa053d723e0c33f15a2974ab2ac9 Mon Sep 17 00:00:00 2001
+From: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Date: Tue, 6 Oct 2026 12:01:02 +0530
+Subject: [PATCH 1/4] feat(plat/qti/cpu) add scmi reset protocol support
+
+Signed-off-by: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ .../arm/css/scmi/scmi_reset_domain_proto.c    | 156 ++++++++++++++++++
+ include/drivers/arm/css/scmi.h                |  50 ++++++
+ include/drivers/qti/cpucp/nord/cpucp_hwio.h   |  52 ++++++
+ plat/qti/common/src/qti_bl31_setup.c          |   1 +
+ plat/qti/common/src/qti_scmi_doorbell.c       | 122 ++++++++++++++
+ plat/qti/{common => cpu}/inc/qti_cpu.h        |   8 +
+ plat/qti/cpu/ncc/src/bl31_cpu_setup.c         | 156 ++++++++++++++++++
+ .../wildcat/common/src/wildcat_bl31_setup.c   |  35 +---
+ plat/qti/wildcat/nord/inc/platform_def.h      |  20 +++
+ plat/qti/wildcat/nord/platform.mk             |  36 ++++
+ plat/qti/wildcat/nord/src/plat_cpuss_config.c |  15 +-
+ 11 files changed, 622 insertions(+), 29 deletions(-)
+ create mode 100644 drivers/arm/css/scmi/scmi_reset_domain_proto.c
+ create mode 100644 include/drivers/qti/cpucp/nord/cpucp_hwio.h
+ create mode 100644 plat/qti/common/src/qti_scmi_doorbell.c
+ rename plat/qti/{common => cpu}/inc/qti_cpu.h (63%)
+ create mode 100644 plat/qti/cpu/ncc/src/bl31_cpu_setup.c
+
+diff --git a/drivers/arm/css/scmi/scmi_reset_domain_proto.c b/drivers/arm/css/scmi/scmi_reset_domain_proto.c
+new file mode 100644
+index 000000000..642576bfb
+--- /dev/null
++++ b/drivers/arm/css/scmi/scmi_reset_domain_proto.c
+@@ -0,0 +1,156 @@
++/*
++ * Copyright (c) 2024, Arm Limited and Contributors. All rights reserved.
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#include <assert.h>
++#include <errno.h>
++
++#include <arch_helpers.h>
++#include <common/debug.h>
++#include <drivers/arm/css/scmi.h>
++
++#include "scmi_private.h"
++
++/*
++ * SCMI Reset Domain Management protocol message and response lengths.
++ * Calculated as sum of header (4 bytes) + payload bytes.
++ *
++ * RESET_DOMAIN_ATTRIBUTES request:  domain_id (4) = 4
++ * RESET_DOMAIN_ATTRIBUTES response: status (4) + attributes (4) +
++ *                                   latency (4) + name (16) = 28
++ *
++ * RESET_REQUEST payload:  domain_id (4) + flags (4) + reset_state (4) = 12
++ * RESET_REQUEST response: status (4)
++ */
++#define SCMI_RESET_DOMAIN_ATTR_MSG_LEN		8U	/* 4 hdr + 4 domain_id */
++#define SCMI_RESET_DOMAIN_ATTR_RESP_LEN		32U	/* 4 hdr + 28 payload  */
++
++#define SCMI_RESET_DOMAIN_RESET_MSG_LEN		16U	/* 4 hdr + 12 payload */
++#define SCMI_RESET_DOMAIN_RESET_RESP_LEN	8U	/* 4 hdr + 4 status  */
++
++/*
++ * Initialize the SCMI reset domain protocol.
++ *
++ * Queries the firmware for the protocol version and verifies it is compatible
++ * with the driver's expected version (SCMI_RESET_DOMAIN_PROTO_VER).
++ *
++ * Returns 0 on success, -EPROTONOSUPPORT if the protocol is not supported or
++ * the version is incompatible, or -EPROTO on other errors.
++ */
++int scmi_reset_domain_init(scmi_channel_t *ch)
++{
++	uint32_t version;
++	int ret;
++
++	ret = scmi_proto_version(ch, SCMI_RESET_DOMAIN_PROTO_ID, &version);
++	if (ret != SCMI_E_SUCCESS) {
++		WARN("SCMI reset domain protocol version message failed\n");
++
++		return (ret == SCMI_E_NOT_SUPPORTED) ? -EPROTONOSUPPORT :
++						       -EPROTO;
++	}
++
++	if (!is_scmi_version_compatible(SCMI_RESET_DOMAIN_PROTO_VER, version)) {
++		WARN("SCMI reset domain protocol version 0x%x incompatible with driver version 0x%x\n",
++		     version, SCMI_RESET_DOMAIN_PROTO_VER);
++
++		return -EPROTONOSUPPORT;
++	}
++
++	VERBOSE("SCMI reset domain protocol version 0x%x detected\n", version);
++
++	return 0;
++}
++
++/*
++ * API to get the SCMI reset domain attributes
++ * (SCMI spec §4.7.2.2 RESET_DOMAIN_ATTRIBUTES command).
++ *
++ * @p:          Opaque pointer to the initialized SCMI channel (scmi_channel_t *)
++ * @domain_id:  Identifier for the reset domain.
++ * @attributes: Pointer to store the domain attributes bitmask:
++ *              Bit[31]: async_support  - 1 = asynchronous reset supported
++ *              Bit[30]: notify_support - 1 = reset notifications supported
++ *              Bits[29:0]: reserved (SBZ)
++ * @latency:    Pointer to store the worst-case reset latency in microseconds.
++ *              0xFFFFFFFF indicates latency is unknown.
++ *
++ * Returns SCMI_E_SUCCESS (0) on success, or a negative SCMI error code.
++ */
++int scmi_reset_domain_attributes(void *p, uint32_t domain_id,
++				 uint32_t *attributes, uint32_t *latency)
++{
++	mailbox_mem_t *mbx_mem;
++	unsigned int token = 0;
++	int ret;
++	scmi_channel_t *ch = (scmi_channel_t *)p;
++
++	validate_scmi_channel(ch);
++
++	scmi_get_channel(ch);
++
++	mbx_mem = (mailbox_mem_t *)(ch->info->scmi_mbx_mem);
++	mbx_mem->msg_header = SCMI_MSG_CREATE(SCMI_RESET_DOMAIN_PROTO_ID,
++					      SCMI_RESET_DOMAIN_ATTRIBUTES_MSG,
++					      token);
++	mbx_mem->len = SCMI_RESET_DOMAIN_ATTR_MSG_LEN;
++	mbx_mem->flags = SCMI_FLAG_RESP_POLL;
++	SCMI_PAYLOAD_ARG1(mbx_mem->payload, domain_id);
++
++	scmi_send_sync_command(ch);
++
++	/* Get the return values */
++	SCMI_PAYLOAD_RET_VAL3(mbx_mem->payload, ret, *attributes, *latency);
++	assert(mbx_mem->len == SCMI_RESET_DOMAIN_ATTR_RESP_LEN);
++	assert(token == SCMI_MSG_GET_TOKEN(mbx_mem->msg_header));
++
++	scmi_put_channel(ch);
++
++	return ret;
++}
++
++/*
++ * API to send an SCMI Reset Domain Management RESET_REQUEST command
++ * (SCMI spec §4.7.2.3).
++ *
++ * @p:           Opaque pointer to the initialized SCMI channel (scmi_channel_t *)
++ * @domain_id:   Identifier for the reset domain.
++ *               For QTI CPUCP: bits[15:8] = cluster (AFF1), bits[7:0] = core (AFF0)
++ * @flags:       Reset flags (SCMI_RESET_FLAG_SYNC / SCMI_RESET_FLAG_AUTONOMOUS etc.)
++ * @reset_state: Reset state (SCMI_RESET_STATE_ARCH / SCMI_RESET_STATE_IMPL | value)
++ *
++ * Returns SCMI_E_SUCCESS (0) on success, or a negative SCMI error code.
++ */
++int scmi_reset_domain_request(void *p, uint32_t domain_id,
++			      uint32_t flags, uint32_t reset_state)
++{
++	mailbox_mem_t *mbx_mem;
++	unsigned int token = 0;
++	int ret;
++	scmi_channel_t *ch = (scmi_channel_t *)p;
++
++	validate_scmi_channel(ch);
++
++	scmi_get_channel(ch);
++
++	mbx_mem = (mailbox_mem_t *)(ch->info->scmi_mbx_mem);
++	mbx_mem->msg_header = SCMI_MSG_CREATE(SCMI_RESET_DOMAIN_PROTO_ID,
++					      SCMI_RESET_DOMAIN_RESET_MSG, token);
++	mbx_mem->len = SCMI_RESET_DOMAIN_RESET_MSG_LEN;
++	mbx_mem->flags = SCMI_FLAG_RESP_POLL;
++	SCMI_PAYLOAD_ARG3(mbx_mem->payload, domain_id, flags, reset_state);
++
++	scmi_send_sync_command(ch);
++
++	/* Get the return values */
++	SCMI_PAYLOAD_RET_VAL1(mbx_mem->payload, ret);
++	assert(mbx_mem->len == SCMI_RESET_DOMAIN_RESET_RESP_LEN);
++	assert(token == SCMI_MSG_GET_TOKEN(mbx_mem->msg_header));
++
++	scmi_put_channel(ch);
++
++	return ret;
++}
+\ No newline at end of file
+diff --git a/include/drivers/arm/css/scmi.h b/include/drivers/arm/css/scmi.h
+index e6c424f0e..182417e89 100644
+--- a/include/drivers/arm/css/scmi.h
++++ b/include/drivers/arm/css/scmi.h
+@@ -17,6 +17,7 @@
+ /* Supported SCMI Protocol Versions */
+ #define SCMI_AP_CORE_PROTO_VER			MAKE_SCMI_VERSION(3, 0)
+ #define SCMI_PWR_DMN_PROTO_VER			MAKE_SCMI_VERSION(3, 0)
++#define SCMI_RESET_DOMAIN_PROTO_VER		MAKE_SCMI_VERSION(3, 0)
+ #define SCMI_SYS_PWR_PROTO_VER			MAKE_SCMI_VERSION(3, 0)
+ 
+ #define GET_SCMI_MAJOR_VER(ver)			(((ver) >> 16) & 0xffff)
+@@ -40,6 +41,7 @@
+ #define SCMI_BASE_PROTO_ID			0x10
+ #define SCMI_PWR_DMN_PROTO_ID			0x11
+ #define SCMI_SYS_PWR_PROTO_ID			0x12
++#define SCMI_RESET_DOMAIN_PROTO_ID		0x16
+ /* The AP core protocol is a CSS platform-specific extension */
+ #define SCMI_AP_CORE_PROTO_ID			0x90
+ 
+@@ -72,6 +74,44 @@
+ #define SCMI_AP_CORE_RESET_ADDR_SET_MSG		0x3
+ #define SCMI_AP_CORE_RESET_ADDR_GET_MSG		0x4
+ 
++/* SCMI Reset Domain Management protocol message IDs (SCMI spec §4.7) */
++#define SCMI_RESET_DOMAIN_ATTRIBUTES_MSG	0x3
++#define SCMI_RESET_DOMAIN_RESET_MSG		0x4
++
++/*
++ * Attribute bits returned by RESET_DOMAIN_ATTRIBUTES (SCMI spec §4.7.2.2):
++ *   Bit[31]: async_support  - 1 = asynchronous reset is supported
++ *   Bit[30]: notify_support - 1 = reset notifications are supported
++ *   Bits[29:0]: reserved (SBZ)
++ */
++#define SCMI_RESET_ATTR_ASYNC_SUPPORT		(1U << 31)
++#define SCMI_RESET_ATTR_NOTIFY_SUPPORT		(1U << 30)
++
++/*
++ * Reset flags (SCMI spec DEN0056F §3.8.2.6 RESET command):
++ *   Bit[0]: Autonomous Reset action
++ *             0 = explicit reset (caller asserts/de-asserts the signal)
++ *             1 = autonomous reset (platform drives the full sequence)
++ *   Bit[1]: Explicit signal (ignored when Bit[0] = 1)
++ *             0 = de-assert reset signal
++ *             1 = assert reset signal
++ *   Bit[2]: Async flag (only valid when Bit[0] = 1)
++ *             0 = synchronous
++ *             1 = asynchronous
++ */
++#define SCMI_RESET_FLAG_SYNC			0U
++#define SCMI_RESET_FLAG_AUTONOMOUS		(1U << 0)
++#define SCMI_RESET_FLAG_ASSERT_SIGNAL		(1U << 1)
++#define SCMI_RESET_FLAG_ASYNC			(1U << 2)
++
++/*
++ * Reset state (SCMI spec §4.7.2.3):
++ *   Bit 31: IMPL_RESET - 0 = architecture-defined, 1 = implementation-defined
++ *   Bits 30:0: architecture-specific reset state value
++ */
++#define SCMI_RESET_STATE_ARCH			0U
++#define SCMI_RESET_STATE_IMPL			(1U << 31)
++
+ /* Helper macros for system power management protocol commands */
+ 
+ /*
+@@ -197,6 +237,16 @@ int scmi_ap_core_init(scmi_channel_t *ch);
+ int scmi_ap_core_set_reset_addr(void *p, uint64_t reset_addr, uint32_t attr);
+ int scmi_ap_core_get_reset_addr(void *p, uint64_t *reset_addr, uint32_t *attr);
+ 
++/*
++ * Reset Domain Management protocol commands (SCMI spec §4.7).
++ * Refer to the SCMI specification for more details on these commands.
++ */
++int scmi_reset_domain_init(scmi_channel_t *ch);
++int scmi_reset_domain_attributes(void *p, uint32_t domain_id,
++				 uint32_t *attributes, uint32_t *latency);
++int scmi_reset_domain_request(void *p, uint32_t domain_id,
++			      uint32_t flags, uint32_t reset_state);
++
+ /* API to get the platform specific SCMI channel information. */
+ scmi_channel_plat_info_t *plat_css_get_scmi_info(unsigned int channel_id);
+ 
+diff --git a/include/drivers/qti/cpucp/nord/cpucp_hwio.h b/include/drivers/qti/cpucp/nord/cpucp_hwio.h
+new file mode 100644
+index 000000000..b79bfe30d
+--- /dev/null
++++ b/include/drivers/qti/cpucp/nord/cpucp_hwio.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++#ifndef QTI_CPUCP_HWIO_H
++#define QTI_CPUCP_HWIO_H
++
++/*
++ * Hardware register addresses for the CPUCP (CPU Control Processor) on
++ * Nord (SM8750 / Wildcat family).
++ *
++ * SCMI shared memory is located in CPUCP DTIM0 (AP-side base 0x18b30000).
++ * The AP Secure to CPUCP SCMI IPC buffer sits at DTIM0 + 0x3000.
++ *
++ * The AP rings the CPUCP doorbell by writing the OSM_IPC bit (bit 28) to
++ * the APSS_INTU TZ_IPC_INTERRUPT register at 0x17824004.
++ */
++
++/* AP-side physical base address of CPUCP DTIM0. */
++#define CPUCP_DTIM0_BASE_AP			(0x18b30000U)
++
++/*
++ * AP Secure to CPUCP SCMI IPC buffer.
++ *
++ * Located in CPUCP DTIM0 at offset 0x3000 (physical address 0x18b33000).
++ * Size: 0x400 bytes (1 KB).
++ */
++#define APSEC_CPUCP_SCMI_IPC_BASE		(CPUCP_DTIM0_BASE_AP + 0x3000U)
++#define APSEC_CPUCP_SCMI_IPC_SIZE		(0x400U)
++
++/* Aliases kept for any existing callers. */
++#define CPUCP_IPC_SEC_BUF_BASE			APSEC_CPUCP_SCMI_IPC_BASE
++#define CPUCP_SECIPC_RAM_LENGTH			APSEC_CPUCP_SCMI_IPC_SIZE
++
++/*
++ * AP to CPUCP doorbell: APSS_INTU TZ_IPC_INTERRUPT register.
++ *
++ * Base: APSS_INTU_IPC_BASE = 0x17824000
++ * Register offset: 0x4
++ * OSM_IPC bit: bit 28
++ *
++ * Writing BIT(28) to this register raises an interrupt on CPUCP,
++ * notifying it that a new SCMI message is ready in the IPC buffer.
++ */
++#define APSS_SHARED_TZ_IPC_BASE				(0x17824000U)
++#define APSS_SHARED_TZ_IPC_INTERRUPT_ADDR		(APSS_SHARED_TZ_IPC_BASE + 0x4U)
++#define APSS_SHARED_TZ_IPC_INTERRUPT_OSM_IPC_SHFT	(28U)
++#define APSS_SHARED_TZ_IPC_INTERRUPT_BIT		(1U << APSS_SHARED_TZ_IPC_INTERRUPT_OSM_IPC_SHFT)
++
++#endif /* QTI_CPUCP_HWIO_H */
+\ No newline at end of file
+diff --git a/plat/qti/common/src/qti_bl31_setup.c b/plat/qti/common/src/qti_bl31_setup.c
+index 0b2ca6f3b..2cc251efe 100644
+--- a/plat/qti/common/src/qti_bl31_setup.c
++++ b/plat/qti/common/src/qti_bl31_setup.c
+@@ -87,6 +87,7 @@ void bl31_early_platform_setup(u_register_t from_bl2,
+ void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,
+ 				u_register_t arg2, u_register_t arg3)
+ {
++
+ 	bl31_early_platform_setup(arg0, arg1);
+ }
+ 
+diff --git a/plat/qti/common/src/qti_scmi_doorbell.c b/plat/qti/common/src/qti_scmi_doorbell.c
+new file mode 100644
+index 000000000..e5f5d82f3
+--- /dev/null
++++ b/plat/qti/common/src/qti_scmi_doorbell.c
+@@ -0,0 +1,122 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * QTI platform SCMI doorbell (mailbox) implementation.
++ *
++ * Platform-specific SCMI channel parameters (mailbox base address, doorbell
++ * register, masks, timeout) are obtained from platform_def.h so that this
++ * file remains SoC-agnostic.
++ *
++ * This file provides:
++ *   - qti_scmi_ring_doorbell()    – the ring_doorbell callback used by the
++ *                                   ARM CSS SCMI driver
++ *   - qti_scmi_plat_info         – the scmi_channel_plat_info_t descriptor
++ *   - qti_scmi_get_channel()     – initialise and return the SCMI channel
++ *   - plat_css_get_scmi_info()   – weak platform hook consumed by the
++ *                                   ARM CSS SCMI driver
++ */
++
++#include <stdint.h>
++
++#include <arch_helpers.h>
++#include <common/debug.h>
++#include <lib/bakery_lock.h>
++#include <lib/mmio.h>
++#include <lib/spinlock.h>
++
++#include <drivers/arm/css/scmi.h>
++
++#include <platform_def.h>
++
++/*
++ * qti_scmi_ring_doorbell - write the doorbell register to notify the remote
++ * processor (CPUCP/SCP) that a new SCMI packet is ready in shared memory.
++ *
++ * The register is a write-1-to-set trigger; bits not written are unaffected,
++ * so db_preserve_mask is 0 and we simply write db_modify_mask directly.
++ */
++static void qti_scmi_ring_doorbell(struct scmi_channel_plat_info *plat_info)
++{
++	mmio_write_32((uintptr_t)plat_info->db_reg_addr,
++		      plat_info->db_modify_mask);
++}
++
++/*
++ * qti_scmi_plat_info - SCMI channel platform descriptor.
++ *
++ * All addresses and masks are sourced from platform_def.h so that this
++ * file does not need to be modified when porting to a new SoC.
++ */
++static scmi_channel_plat_info_t qti_scmi_plat_info = {
++	.scmi_mbx_mem     = QTI_SCMI_MBX_MEM_BASE,
++	.db_reg_addr      = QTI_SCMI_DB_REG_ADDR,
++	.db_preserve_mask = QTI_SCMI_DB_PRESERVE_MASK,
++	.db_modify_mask   = QTI_SCMI_DB_MODIFY_MASK,
++	.ring_doorbell    = qti_scmi_ring_doorbell,
++	.cookie           = NULL,
++	.delay            = QTI_SCMI_POLL_DELAY_US,
++	.timeout          = QTI_SCMI_TIMEOUT_US,
++};
++
++/* SCMI channel lock – type depends on HW_ASSISTED_COHERENCY. */
++static scmi_lock_t qti_scmi_lock;
++
++/* SCMI channel instance. */
++static scmi_channel_t qti_scmi_channel = {
++	.info           = &qti_scmi_plat_info,
++	.lock           = &qti_scmi_lock,
++	.is_initialized = 0,
++};
++
++/*
++ * qti_scmi_get_channel - initialise and return the QTI SCMI channel.
++ *
++ * Calls scmi_init() to initialise the channel lock via the standard ARM CSS
++ * SCMI driver path.  scmi_init() also queries the Power Domain (0x11) and
++ * System Power (0x12) protocol versions; CPUCP on Nord only implements the
++ * Reset Domain protocol (0x16), so those queries will fail and scmi_init()
++ * will return NULL.  In that case the channel lock has already been
++ * initialised by scmi_init(), so we mark the channel ready manually to allow
++ * the Reset Domain protocol to proceed.
++ *
++ * Returns a pointer to the initialised scmi_channel_t cast to void *, or
++ * NULL if the channel could not be initialised at all.
++ */
++void *qti_scmi_get_channel(void)
++{
++	if (qti_scmi_channel.is_initialized != 0) {
++		return (void *)&qti_scmi_channel;
++	}
++
++	/*
++	 * scmi_init() initialises the channel lock and then queries the
++	 * Power Domain and System Power protocol versions.  CPUCP on Nord
++	 * does not implement those protocols, so scmi_init() is expected to
++	 * return NULL after printing a WARN.  The lock is already initialised
++	 * at that point, so we just set is_initialized = 1 to allow the
++	 * Reset Domain protocol (0x16) to be used.
++	 */
++	if (scmi_init(&qti_scmi_channel, NULL) == NULL) {
++		INFO("QTI SCMI: scmi_init() returned NULL; CPUCP does not "
++		     "implement power-domain/sys-power protocols. "
++		     "Channel usable for Reset Domain protocol.\n");
++		qti_scmi_channel.is_initialized = 1;
++	}
++
++	return (void *)&qti_scmi_channel;
++}
++
++/*
++ * plat_css_get_scmi_info - return the platform SCMI channel descriptor.
++ *
++ * This is the weak hook declared in include/drivers/arm/css/scmi.h that
++ * platform code must override to supply the channel parameters.  The ARM CSS
++ * SCMI driver calls this during scmi_init() to obtain the mailbox base
++ * address, doorbell register, and ring_doorbell callback.
++ */
++scmi_channel_plat_info_t *plat_css_get_scmi_info(unsigned int channel_id __unused)
++{
++	return &qti_scmi_plat_info;
++}
+diff --git a/plat/qti/common/inc/qti_cpu.h b/plat/qti/cpu/inc/qti_cpu.h
+similarity index 63%
+rename from plat/qti/common/inc/qti_cpu.h
+rename to plat/qti/cpu/inc/qti_cpu.h
+index 3316f7bb2..a0fc487c4 100644
+--- a/plat/qti/common/inc/qti_cpu.h
++++ b/plat/qti/cpu/inc/qti_cpu.h
+@@ -19,4 +19,12 @@
+ /* KRYO-6xx Silver MIDR */
+ #define QTI_KRYO6_SILVER_MIDR	0x412FD050
+ 
++/*
++ * plat_qti_cpu_boot_cluster_reset - NCC boot-core CL4 sleep-state workaround.
++ *
++ * Implemented in plat/qti/cpu/ncc/src/bl31_cpu_setup.c.
++ * Called once from bl31_early_platform_setup() on the boot core only.
++ */
++
++void plat_qti_cpu_boot_cluster_reset(void);
+ #endif /* QTI_CPU_H */
+diff --git a/plat/qti/cpu/ncc/src/bl31_cpu_setup.c b/plat/qti/cpu/ncc/src/bl31_cpu_setup.c
+new file mode 100644
+index 000000000..eb17cc4c3
+--- /dev/null
++++ b/plat/qti/cpu/ncc/src/bl31_cpu_setup.c
+@@ -0,0 +1,156 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * NCC (Oryon) CPU-specific BL31 setup for QTI platforms.
++ *
++ * This file contains CPU-specific initialisation for the Qualcomm NCC
++ * (Next-generation Custom CPU / Oryon) architecture. It is selected by
++ * setting QTI_NCC_CPU := 1 in the platform.mk file.
++ *
++ * Responsibilities:
++ *   - EL3 GIC system-register interface initialisation (qti_el3_sys_regs_init)
++ *   - Boot-core CL4 sleep-state reset workaround via SCMI Reset Domain
++ *     Management protocol (qti_ncc_cpu_reset_sync)
++ *   - plat_qti_cpu_boot_setup entry point called by wildcat_bl31_setup.c
++ */
++
++#include <arch_helpers.h>
++#include <common/debug.h>
++#include <drivers/arm/css/scmi.h>
++
++/* Forward declaration – provided by plat/qti/common/src/qti_scmi_doorbell.c */
++void *qti_scmi_get_channel(void);
++
++/*
++ * Reset state encoding for the NCC CL4 workaround:
++ *   Bit 31 = IMPL_RESET (implementation-defined reset)
++ *   Bits 30:0 = CL4 (architecture-specific sleep state 4)
++ */
++#define NCC_RESET_STATE_CL4	(SCMI_RESET_STATE_IMPL | 0x4U)
++
++/*
++ * qti_el3_sys_regs_init - Initialise EL3 system registers for NCC CPUs.
++ *
++ * Configures the GIC system-register interface and interrupt-control
++ * registers at EL3 for the NCC (Oryon) CPU architecture.
++ */
++void qti_el3_sys_regs_init(void)
++{
++	/* EL3 SRE: enable system-register interface for EL3 */
++	write_icc_sre_el3(0x9U | read_icc_sre_el3());
++
++	/* Set PMHE & IDbits to 24 bits */
++	write_icc_ctlr_el3(0xCC40U);
++
++	/* EL1 SRE: enable system-register interface for EL1 */
++	write_icc_sre_el1(0x1U | read_icc_sre_el1());
++
++	/* Enable Group 0 interrupts at EL1 */
++	write_icc_igrpen0_el1(1U);
++}
++
++/* Execute WFI. Core enters into LPM based on the LPM config */
++void execute_wfi(void)
++{
++	asm volatile("wfi");
++}
++
++
++
++/*
++ * qti_ncc_cpu_reset_sync - Apply the NCC boot-core CL4 sleep-state reset
++ * workaround via the ARM SCMI Reset Domain Management protocol.
++ *
++ * Context: single-core, called from bl31_early_platform_setup before
++ * secondary cores are brought up.
++ *
++ * Mechanism:
++ *   1. Encode the target core as domain_id = (AFF1 << 8) | AFF0.
++ *   2. Send RESET_REQUEST (protocol 0x16, message 0x4) to CPUCP with:
++ *        flags       = AUTONOMOUS_RESET_ACTION (synchronous, autonomous)
++ *        reset_state = IMPL_RESET | CL4
++ *   3. Enter WFI.  CPUCP applies the workaround and releases the core.
++ *   4. Execution resumes from WFI+4 (the instruction after wfi).
++ *
++ * Returns 0 on success, or a negative SCMI error code on failure.
++ */
++static int qti_ncc_cpu_reset_sync(uint64_t mpidr)
++{
++	void *ch;
++	uint32_t domain_id;
++	uint32_t flags;
++	uint32_t reset_state;
++	int ret;
++	uint8_t core_id    = (uint8_t)MPIDR_AFFLVL0_VAL(mpidr);
++	uint8_t cluster_id = (uint8_t)MPIDR_AFFLVL1_VAL(mpidr);
++
++	ch = qti_scmi_get_channel();
++	if (ch == NULL) {
++		ERROR("NCC: failed to get SCMI channel\n");
++		return -1;
++	}
++
++	/*
++	 * Encode the target reset domain as CPUCP expects:
++	 *   bits [15:8] = cluster index (MPIDR AFF1)
++	 *   bits  [7:0] = core index within the cluster (MPIDR AFF0)
++	 */
++	domain_id = ((uint32_t)cluster_id << 8U) | (uint32_t)core_id;
++
++	/*
++	 * flags: Bit[0] = AUTONOMOUS_ACTION = 1 (platform drives the sequence),
++	 *        Bit[2] = ASYNC_FLAG = 0 (synchronous).
++	 * Per DEN0056F §3.8.2.6: Bit[0] = Autonomous Reset action.
++	 */
++	flags = SCMI_RESET_FLAG_SYNC | SCMI_RESET_FLAG_AUTONOMOUS;
++
++	/*
++	 * reset_state: IMPL_RESET | CL4.
++	 * CPUCP interprets this as "apply the CL4 workaround for this core".
++	 */
++	reset_state = NCC_RESET_STATE_CL4;
++
++	ret = scmi_reset_domain_request(ch, domain_id, flags, reset_state);
++	if (ret != SCMI_E_SUCCESS) {
++		ERROR("NCC: SCMI reset domain request failed: %d\n", ret);
++		return ret;
++	}
++
++	/*
++	 * SCMI command acknowledged.  Enter WFI; CPUCP applies the workaround
++	 * and releases the core.  Execution resumes here (WFI+4).
++	 */
++	execute_wfi();
++
++	return 0;
++}
++
++/*
++ * plat_qti_cpu_boot_setup - NCC CPU per-core EL3 register initialisation.
++ *
++ * Called from plat_reset_handler() for every CPU (boot core and secondaries).
++ * Must only perform operations that are safe to run on every core reset.
++ */
++void plat_qti_cpu_boot_setup(void)
++{
++	qti_el3_sys_regs_init();
++}
++
++/*
++ * plat_qti_cpu_boot_cluster_reset - NCC boot-core CL4 sleep-state workaround.
++ *
++ * Called once from bl31_early_platform_setup() on the boot core only,
++ * before secondary cores are brought up.  Sends an SCMI Reset Domain
++ * request to CPUCP to apply the CL4 sleep-state reset workaround.
++ */
++void plat_qti_cpu_boot_cluster_reset(void)
++{
++	int ret;
++
++	ret = qti_ncc_cpu_reset_sync(read_mpidr());
++	if (ret != 0) {
++		WARN("NCC: boot-core reset sync returned %d\n", ret);
++	}
++}
+diff --git a/plat/qti/wildcat/common/src/wildcat_bl31_setup.c b/plat/qti/wildcat/common/src/wildcat_bl31_setup.c
+index 51a23d11a..0e3739b91 100644
+--- a/plat/qti/wildcat/common/src/wildcat_bl31_setup.c
++++ b/plat/qti/wildcat/common/src/wildcat_bl31_setup.c
+@@ -33,6 +33,7 @@
+ #include <platform.h>
+ #include <platform_def.h>
+ #include <qti_interrupt_svc.h>
++#include <qti_cpu.h>
+ #include <qti_plat.h>
+ #include <qti_ringbuf_console.h>
+ #include <qti_sbl_shared_info.h>
+@@ -127,34 +128,6 @@ static bool qti_aux_param_handler(struct bl_aux_param_header *param)
+ 	}
+ }
+ 
+-void qti_el3_sys_regs_init(void) /* NEEDSWORK */
+-{
+-	/* can be implemented in bl31qtilib */
+-	/* Enable MPAM if it is supported */
+-	/*
+-	 * Enables the system register interface for interrupt management for
+-	 * El3 and El1 (gic v3)
+-	 */
+-	/* EL3 SRE Setting */
+-	write_icc_sre_el3(0x9U | read_icc_sre_el3());
+-
+-	/* Set PMHE & IDbits to 24 bits */
+-	write_icc_ctlr_el3(0xCC40);
+-
+-	/* EL1 SRE Setting */
+-	write_icc_sre_el1(0x1U | read_icc_sre_el1());
+-
+-	/* PC DEBUG:: Setting ICC_IGRPEN0_EL1 to 1 */
+-	write_icc_igrpen0_el1(1);
+-
+-	/* Clear SCTLR_EL2 */
+-}
+-
+-void plat_qti_cpu_boot_setup(void)
+-{
+-	qti_el3_sys_regs_init();
+-}
+-
+ /*******************************************************************************
+  * Perform any BL31 early platform setup common to ARM standard platforms.
+  * Here is an opportunity to copy parameters passed by the calling EL (S-EL1
+@@ -311,6 +284,12 @@ void bl31_platform_setup(void)
+ 		WARN("ChipInfo initialization error\n");
+ 	}
+ 
++
++	/* Initialise the generic delay timer early; used by all subsystems. */
++	generic_delay_timer_init();
++
++	plat_qti_cpu_boot_cluster_reset();
++
+ 	/**
+ 	 * Initialize the EL3 interrupt service and
+ 	 * registers EL3 common interrupt handler
+diff --git a/plat/qti/wildcat/nord/inc/platform_def.h b/plat/qti/wildcat/nord/inc/platform_def.h
+index bfc367046..1d9616f27 100644
+--- a/plat/qti/wildcat/nord/inc/platform_def.h
++++ b/plat/qti/wildcat/nord/inc/platform_def.h
+@@ -10,6 +10,7 @@
+ /* Enable the dynamic translation tables library. */
+ #define PLAT_XLAT_TABLES_DYNAMIC 1
+ 
++#include <cpucp_hwio.h>
+ #include <common_def.h>
+ 
+ #include <qti_board_def.h>
+@@ -185,4 +186,23 @@
+ #define QTI_TFA_TME_MBOX_INTERRUPT	0x17824010
+ #define QTI_TFA_TME_MBOX_INTERRUPT_MSK	0x1
+ 
++/* SCMI channel parameters for CPUCP communication.                          */
++/*                                                                            */
++/* Mailbox:  CPUCP DTIM0 + 0x3000 = 0x18b33000 (AP Secure to CPUCP buffer)  */
++/* Doorbell: APSS_INTU TZ_IPC_INTERRUPT (0x17824004), OSM_IPC bit 28         */
++/*----------------------------------------------------------------------------*/
++
++/* SCMI shared-memory mailbox: AP Secure to CPUCP IPC buffer in CPUCP DTIM0. */
++#define QTI_SCMI_MBX_MEM_BASE		APSEC_CPUCP_SCMI_IPC_BASE
++#define QTI_SCMI_MBX_MEM_SIZE		APSEC_CPUCP_SCMI_IPC_SIZE
++
++/* AP to CPUCP doorbell: write OSM_IPC bit to APSS_INTU TZ_IPC_INTERRUPT. */
++#define QTI_SCMI_DB_REG_ADDR		APSS_SHARED_TZ_IPC_INTERRUPT_ADDR
++#define QTI_SCMI_DB_MODIFY_MASK		APSS_SHARED_TZ_IPC_INTERRUPT_BIT
++#define QTI_SCMI_DB_PRESERVE_MASK	(0xFFFFFFFeU)
++
++/* Poll delay (us) and timeout (us) for SCMI command completion. */
++#define QTI_SCMI_POLL_DELAY_US		(0U)
++#define QTI_SCMI_TIMEOUT_US		(500000U)
++
+ #endif /* PLATFORM_DEF_H */
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 58b64c0c2..8b2b7dece 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -109,6 +109,7 @@ QTI_EXTERNAL_INCLUDES	:=	-I${QTI_PLAT_PATH}/${CHIPSET}/inc			\
+ 				-I${QTI_PLAT_PATH}/common/inc				\
+ 				-I${QTI_PLAT_PATH}/common/inc/$(ARCH)			\
+ 				-I${PLAT_QTI_ROOT}/common/inc/$(ARCH)			\
++				-I${PLAT_QTI_ROOT}/cpu/inc				\
+ 				-I${QTI_PLAT_PATH}/bl31qtilib/inc			\
+ 				-I${PLAT_QTI_ROOT}/common/inc				\
+ 
+@@ -184,15 +185,50 @@ $(eval $(call add_define, QTI_NO_SMCC_ARCH_SOC_ID))
+ 
+ CPU_SOURCES		:=	$(QTI_PLAT_PATH)/common/src/aarch64/qcom_oryon_v1.S
+ 
++#
++# CPU-specific BL31 setup: select NCC (Oryon) or standard ARM implementation.
++#
++# QTI_NCC_CPU=1  -> plat/qti/cpu/ncc/src/bl31_cpu_setup.c
++#                   Includes EL3 register init + SCMI Reset Domain workaround.
++# QTI_NCC_CPU=0  -> plat/qti/cpu/arm/src/bl31_cpu_setup.c
++#                   Includes EL3 register init only (no NCC workaround).
++#
++QTI_CPU_PATH		:=	plat/qti/cpu
++
++ifeq ($(QTI_NCC_CPU),1)
++$(eval $(call add_define,QTI_NCC_CPU))
++BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/ncc/src/bl31_cpu_setup.c
++else
++BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/arm/src/bl31_cpu_setup.c
++endif
++
++#
++# SCMI driver sources: ARM CSS SCMI stack + QTI platform doorbell.
++#
++# CPUCP on Nord implements only the Reset Domain protocol (0x16).
++# The Power Domain (0x11) and System Power (0x12) protocols are not
++# supported; skip the System Power version check in scmi_init() to
++# prevent a timeout panic during channel initialisation.
++#
++SCMI_SKIP_SYS_PWR_PROTO_CHECK	:= 1
++$(eval $(call add_define,SCMI_SKIP_SYS_PWR_PROTO_CHECK))
++
++SCMI_SOURCES		:=	drivers/arm/css/scmi/scmi_common.c		\
++				drivers/arm/css/scmi/scmi_reset_domain_proto.c	\
++				$(PLAT_QTI_ROOT)/common/src/qti_scmi_doorbell.c
++
+ BL31_SOURCES		+=	${QTI_BL31_SOURCES}				\
+ 				${GIC_SOURCES}					\
+ 				${TIMER_SOURCES}				\
+ 				${CPU_SOURCES}					\
++				${BL31_CPU_SETUP_SRC}				\
++				${SCMI_SOURCES}
+ 
+ BL31_SOURCES		+=	${QGIC_DRV_PATH}/qgic_intr_el3.c
+ BL31_SOURCES		+=	$(QTI_PLAT_PATH)/${CHIPSET}/src/plat_cpuss_config.c
+ 
+ PLAT_INCLUDES	+=	-Iinclude/drivers/qti/qtimer/${CHIPSET}
++PLAT_INCLUDES	+=	-Iinclude/drivers/qti/cpucp/${CHIPSET}
+ 
+ QTI_USE_QTIMER		:=	1
+ QTI_USE_NCC_QTIMER	:=	1
+diff --git a/plat/qti/wildcat/nord/src/plat_cpuss_config.c b/plat/qti/wildcat/nord/src/plat_cpuss_config.c
+index 9f7082f18..6f9b1f886 100644
+--- a/plat/qti/wildcat/nord/src/plat_cpuss_config.c
++++ b/plat/qti/wildcat/nord/src/plat_cpuss_config.c
+@@ -7,6 +7,8 @@
+ 
+ #include <stdint.h>
+ 
++#include <arch_helpers.h>
++
+ #include <qti_plat.h>
+ 
+ /* INTU base = HWIO_APSS_HM_BASE(0x17000000) + 0x840000  (NORDV2 SConscript) */
+@@ -65,7 +67,18 @@ void plat_irq_config(void)
+ 			    nord_seca_direct_cfg, NUM_DIRECT_SPI_WORDS);
+ }
+ 
+-/* Configures platform CPUSS specific configurations */
++/*
++ * plat_cpuss_config - Platform CPUSS-specific configuration.
++ *
++ * Called from bl31_platform_setup() in wildcat_bl31_setup.c.
++ *
++ * Configures SPI interrupt edge/level types for the nord platform.
++ *
++ * Note: The boot-core CL4 sleep-state reset workaround (previously
++ * apps_reset_sync) has been moved to plat_qti_cpu_boot_setup() in
++ * plat/qti/cpu/ncc/src/bl31_cpu_setup.c, which is called earlier from
++ * bl31_early_platform_setup().
++ */
+ void plat_cpuss_config(void)
+ {
+ 	/* SPI interrupt edge/level configuration */
+-- 
+2.43.0
+
