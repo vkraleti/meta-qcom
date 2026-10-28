@@ -1,0 +1,1409 @@
+From 374cc8f4d8977d1994fd4c2d396d947950adff85 Mon Sep 17 00:00:00 2001
+From: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Date: Thu, 15 Oct 2026 22:12:36 +0530
+Subject: [PATCH 3/4] feat(plat/qti/cpu) add multicore support for nord
+
+Signed-off-by: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ plat/qti/cpu/ncc/include/ncc_cpu_power.h      |  53 ++
+ plat/qti/cpu/ncc/include/ncc_hwio.h           | 127 ++++
+ plat/qti/cpu/ncc/src/bl31_cpu_setup.c         |  87 +--
+ plat/qti/cpu/ncc/src/ncc_cpu_power.c          | 223 +++++++
+ plat/qti/cpu/ncc/src/qcom_ncc_psci.c          | 550 ++++++++++++++++++
+ plat/qti/wildcat/common/inc/qti_plat.h        |  14 +
+ plat/qti/wildcat/hamoa/platform.mk            |  15 +-
+ .../qti/wildcat/hamoa/src/plat_cpuss_config.c |  15 +
+ plat/qti/wildcat/nord/platform.mk             |  19 +-
+ plat/qti/wildcat/nord/src/plat_cpuss_config.c |  88 ++-
+ 10 files changed, 1098 insertions(+), 93 deletions(-)
+ create mode 100644 plat/qti/cpu/ncc/include/ncc_cpu_power.h
+ create mode 100644 plat/qti/cpu/ncc/include/ncc_hwio.h
+ create mode 100644 plat/qti/cpu/ncc/src/ncc_cpu_power.c
+ create mode 100644 plat/qti/cpu/ncc/src/qcom_ncc_psci.c
+ create mode 100644 plat/qti/wildcat/hamoa/src/plat_cpuss_config.c
+
+diff --git a/plat/qti/cpu/ncc/include/ncc_cpu_power.h b/plat/qti/cpu/ncc/include/ncc_cpu_power.h
+new file mode 100644
+index 000000000..78208c127
+--- /dev/null
++++ b/plat/qti/cpu/ncc/include/ncc_cpu_power.h
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * NCC CPU power management interface.
++ *
++ * Declares the NCC CPU power API used by the PSCI layer (qcom_ncc_psci.c).
++ * The implementation (ncc_cpu_power.c) uses the ARM CSS SCMI Power Domain
++ * Management Protocol (drivers/arm/css/scmi/scmi_pwr_dmn_proto.c) to
++ * communicate with the CPUCP co-processor firmware.
++ *
++ * Power state encoding (SCMI spec §14.4.4, level-type):
++ *   NCC_SCMI_PWR_STATE_ON  = 0x0  (level 0 = powered on)
++ *   NCC_SCMI_PWR_STATE_OFF = 0x1  (level 1 = powered off)
++ *
++ * Domain ID encoding:
++ *   NCC_SCMI_DOMAIN_ID(cluster, core) = (cluster << 8) | core
++ */
++
++#ifndef NCC_CPU_POWER_H
++#define NCC_CPU_POWER_H
++
++#include <stdint.h>
++
++/*
++ * SCMI Power Domain power state values for CPUCP (level-type encoding,
++ * SCMI spec §14.4.4).
++ *   ON  = level 0 = 0x0
++ *   OFF = level 1 = 0x1
++ */
++#define NCC_SCMI_PWR_STATE_ON	0U
++#define NCC_SCMI_PWR_STATE_OFF	1U
++
++/*
++ * SCMI domain ID for a CPU core:
++ *   bits [15:8] = cluster index (MPIDR AFF2)
++ *   bits  [7:0] = core index   (MPIDR AFF0)
++ */
++#define NCC_SCMI_DOMAIN_ID(cluster, core) \
++	(((uint32_t)(cluster) << 8U) | (uint32_t)(core))
++
++/*
++ * NCC CPU power management API.
++ * Implemented in ncc_cpu_power.c using the SCMI Power Domain protocol
++ * (drivers/arm/css/scmi/scmi_pwr_dmn_proto.c).
++ */
++uint32_t cpucp_cluster_core_power_on(uint64_t mpidr);
++uint32_t cpucp_cluster_core_power_off(uint64_t mpidr);
++uint32_t cpucp_get_cluster_core_power_info(uint64_t mpidr, uint32_t *state);
++void cpuss_pwron_lib_init(void);
++
++#endif /* NCC_CPU_POWER_H */
+\ No newline at end of file
+diff --git a/plat/qti/cpu/ncc/include/ncc_hwio.h b/plat/qti/cpu/ncc/include/ncc_hwio.h
+new file mode 100644
+index 000000000..0cacd715a
+--- /dev/null
++++ b/plat/qti/cpu/ncc/include/ncc_hwio.h
+@@ -0,0 +1,127 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * NCC (Next-generation CPU Cluster) hardware register definitions for Nord.
++ *
++ * Defines the NCC0 architecture register addresses, bit-field masks/shifts,
++ * and LPM state identifiers used by qcom_ncc_psci.c to program the NCC LPM
++ * permission bits and RVBAR-force control.
++ *
++ * TODO: Verify all register addresses and bit-field positions against the
++ *       Nord NCC register specification / SoC memory map.
++ */
++
++#ifndef NCC_HWIO_H
++#define NCC_HWIO_H
++
++#include <stdint.h>
++
++/* --------------------------------------------------------------------------
++ * NCC cluster topology
++ * -------------------------------------------------------------------------- */
++
++/*
++ * Physical stride between consecutive NCC cluster register banks.
++ * Each cluster occupies a contiguous 0x10000-byte window.
++ * TODO: Verify against Nord NCC register map.
++ */
++#define NCC_CLUSTER_STRIDE		(0x10000ULL)
++
++/* --------------------------------------------------------------------------
++ * NCC0 architecture register base addresses (cluster 0).
++ * Cluster N base = NCC0_NCC_NCC_ARCH_0_BASE + N * NCC_CLUSTER_STRIDE
++ *
++ * TODO: Verify base address against Nord SoC memory map.
++ * -------------------------------------------------------------------------- */
++#define NCC0_NCC_NCC_ARCH_0_BASE	(0x18200000ULL)
++
++/*
++ * NCC_PWR_CFG1 – core and cluster LPM permission register.
++ * Controls OK2ENTERC3/C4 (per-core) and OK2ENTERCL3/CL4 (per-cluster) bits.
++ */
++#define NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 \
++	(NCC0_NCC_NCC_ARCH_0_BASE + 0x0008ULL)
++
++/*
++ * NCC_BOOT_CFG1 – cluster boot/power configuration register.
++ * Controls OK2ENTERCL5 (cluster CL5 permission) bit.
++ */
++#define NCC0_NCC_NCC_ARCH_0_NCC_BOOT_CFG1 \
++	(NCC0_NCC_NCC_ARCH_0_BASE + 0x0010ULL)
++
++/*
++ * NCC_PWR_CTL3 – core power control register 3.
++ * Controls CORFRCCPURVBAR (force RVBAR fetch on next power-on) per-core bits.
++ */
++#define NCC0_NCC_NCC_ARCH_0_NCC_PWR_CTL3 \
++	(NCC0_NCC_NCC_ARCH_0_BASE + 0x0020ULL)
++
++/* --------------------------------------------------------------------------
++ * NCC_PWR_CFG1 bit-field definitions
++ *
++ * Per-core C3/C4 LPM permission bits (bits[7:0] = core mask):
++ *   OK2ENTERC3: allow core to enter C3 (clock-gated)
++ *   OK2ENTERC4: allow core to enter C4 (power-collapsed)
++ *
++ * Per-cluster CL3/CL4 LPM permission bits:
++ *   OK2ENTERCL3: allow cluster to enter CL3
++ *   OK2ENTERCL4: allow cluster to enter CL4 (L2 power-collapsed)
++ *
++ * TODO: Verify bit positions against Nord NCC register specification.
++ * -------------------------------------------------------------------------- */
++#define OK2ENTERC3_SHIFT	0U
++#define OK2ENTERC3_MASK		0xFFU
++#define OK2ENTERC4_SHIFT	8U
++#define OK2ENTERC4_MASK		0xFFU
++#define OK2ENTERCL3_SHIFT	16U
++#define OK2ENTERCL3_MASK	0x1U
++#define OK2ENTERCL4_SHIFT	17U
++#define OK2ENTERCL4_MASK	0x1U
++
++/* --------------------------------------------------------------------------
++ * NCC_BOOT_CFG1 bit-field definitions
++ *
++ * OK2ENTERCL5: allow cluster to enter CL5 (fully powered off).
++ *
++ * TODO: Verify bit position against Nord NCC register specification.
++ * -------------------------------------------------------------------------- */
++#define OK2ENTERCL5_SHIFT	0U
++#define OK2ENTERCL5_MASK	0x1U
++
++/* --------------------------------------------------------------------------
++ * NCC_PWR_CTL3 bit-field definitions
++ *
++ * CORFRCCPURVBAR: force RVBAR fetch on next power-on (per-core bits).
++ * When set, the core fetches its reset vector from RVBAR_EL3 on the next
++ * power-on, ensuring it re-enters TF-A warm-boot after a power-collapse.
++ *
++ * TODO: Verify bit positions against Nord NCC register specification.
++ * -------------------------------------------------------------------------- */
++#define CORFRCCPURVBAR_SHIFT	0U
++#define CORFRCCPURVBAR_MASK	0xFFU
++
++/* --------------------------------------------------------------------------
++ * NCC LPM state identifiers.
++ *
++ * These are plat_local_state_t values used in the PSCI power-state arrays
++ * and as switch-case labels in ncc_config_core_lpm / ncc_config_cluster_lpm.
++ * They must match the QTI_LOCAL_STATE_* values from qti_platform_pm.h so
++ * that qti_pm.c's is_cpu_off() check works correctly.
++ *
++ * Mapping:
++ *   STATE_C3  = QTI_LOCAL_STATE_RET     (5) – core clock-gated, context retained
++ *   STATE_C4  = QTI_LOCAL_STATE_OFF     (6) – core power-collapsed
++ *   STATE_CL4 = QTI_LOCAL_STATE_OFF     (6) – cluster L2 power-collapsed
++ *   STATE_CL5 = QTI_LOCAL_STATE_DEEPOFF (7) – cluster fully off
++ *
++ * Note: STATE_C4 and STATE_CL4 share the same numeric value (6) because
++ * they are used in separate switch statements (core vs cluster context).
++ * -------------------------------------------------------------------------- */
++#define STATE_C3	(5U)	/* = QTI_LOCAL_STATE_RET:     core clock-gated */
++#define STATE_C4	(6U)	/* = QTI_LOCAL_STATE_OFF:     core power-collapsed */
++#define STATE_CL4	(6U)	/* = QTI_LOCAL_STATE_OFF:     cluster L2 collapsed */
++#define STATE_CL5	(7U)	/* = QTI_LOCAL_STATE_DEEPOFF: cluster fully off */
++
++#endif /* NCC_HWIO_H */
+\ No newline at end of file
+diff --git a/plat/qti/cpu/ncc/src/bl31_cpu_setup.c b/plat/qti/cpu/ncc/src/bl31_cpu_setup.c
+index eb17cc4c3..d125975da 100644
+--- a/plat/qti/cpu/ncc/src/bl31_cpu_setup.c
++++ b/plat/qti/cpu/ncc/src/bl31_cpu_setup.c
+@@ -18,17 +18,7 @@
+ 
+ #include <arch_helpers.h>
+ #include <common/debug.h>
+-#include <drivers/arm/css/scmi.h>
+-
+-/* Forward declaration – provided by plat/qti/common/src/qti_scmi_doorbell.c */
+-void *qti_scmi_get_channel(void);
+-
+-/*
+- * Reset state encoding for the NCC CL4 workaround:
+- *   Bit 31 = IMPL_RESET (implementation-defined reset)
+- *   Bits 30:0 = CL4 (architecture-specific sleep state 4)
+- */
+-#define NCC_RESET_STATE_CL4	(SCMI_RESET_STATE_IMPL | 0x4U)
++#include <qti_plat.h>
+ 
+ /*
+  * qti_el3_sys_regs_init - Initialise EL3 system registers for NCC CPUs.
+@@ -51,81 +41,6 @@ void qti_el3_sys_regs_init(void)
+ 	write_icc_igrpen0_el1(1U);
+ }
+ 
+-/* Execute WFI. Core enters into LPM based on the LPM config */
+-void execute_wfi(void)
+-{
+-	asm volatile("wfi");
+-}
+-
+-
+-
+-/*
+- * qti_ncc_cpu_reset_sync - Apply the NCC boot-core CL4 sleep-state reset
+- * workaround via the ARM SCMI Reset Domain Management protocol.
+- *
+- * Context: single-core, called from bl31_early_platform_setup before
+- * secondary cores are brought up.
+- *
+- * Mechanism:
+- *   1. Encode the target core as domain_id = (AFF1 << 8) | AFF0.
+- *   2. Send RESET_REQUEST (protocol 0x16, message 0x4) to CPUCP with:
+- *        flags       = AUTONOMOUS_RESET_ACTION (synchronous, autonomous)
+- *        reset_state = IMPL_RESET | CL4
+- *   3. Enter WFI.  CPUCP applies the workaround and releases the core.
+- *   4. Execution resumes from WFI+4 (the instruction after wfi).
+- *
+- * Returns 0 on success, or a negative SCMI error code on failure.
+- */
+-static int qti_ncc_cpu_reset_sync(uint64_t mpidr)
+-{
+-	void *ch;
+-	uint32_t domain_id;
+-	uint32_t flags;
+-	uint32_t reset_state;
+-	int ret;
+-	uint8_t core_id    = (uint8_t)MPIDR_AFFLVL0_VAL(mpidr);
+-	uint8_t cluster_id = (uint8_t)MPIDR_AFFLVL1_VAL(mpidr);
+-
+-	ch = qti_scmi_get_channel();
+-	if (ch == NULL) {
+-		ERROR("NCC: failed to get SCMI channel\n");
+-		return -1;
+-	}
+-
+-	/*
+-	 * Encode the target reset domain as CPUCP expects:
+-	 *   bits [15:8] = cluster index (MPIDR AFF1)
+-	 *   bits  [7:0] = core index within the cluster (MPIDR AFF0)
+-	 */
+-	domain_id = ((uint32_t)cluster_id << 8U) | (uint32_t)core_id;
+-
+-	/*
+-	 * flags: Bit[0] = AUTONOMOUS_ACTION = 1 (platform drives the sequence),
+-	 *        Bit[2] = ASYNC_FLAG = 0 (synchronous).
+-	 * Per DEN0056F §3.8.2.6: Bit[0] = Autonomous Reset action.
+-	 */
+-	flags = SCMI_RESET_FLAG_SYNC | SCMI_RESET_FLAG_AUTONOMOUS;
+-
+-	/*
+-	 * reset_state: IMPL_RESET | CL4.
+-	 * CPUCP interprets this as "apply the CL4 workaround for this core".
+-	 */
+-	reset_state = NCC_RESET_STATE_CL4;
+-
+-	ret = scmi_reset_domain_request(ch, domain_id, flags, reset_state);
+-	if (ret != SCMI_E_SUCCESS) {
+-		ERROR("NCC: SCMI reset domain request failed: %d\n", ret);
+-		return ret;
+-	}
+-
+-	/*
+-	 * SCMI command acknowledged.  Enter WFI; CPUCP applies the workaround
+-	 * and releases the core.  Execution resumes here (WFI+4).
+-	 */
+-	execute_wfi();
+-
+-	return 0;
+-}
+ 
+ /*
+  * plat_qti_cpu_boot_setup - NCC CPU per-core EL3 register initialisation.
+diff --git a/plat/qti/cpu/ncc/src/ncc_cpu_power.c b/plat/qti/cpu/ncc/src/ncc_cpu_power.c
+new file mode 100644
+index 000000000..c7f277e36
+--- /dev/null
++++ b/plat/qti/cpu/ncc/src/ncc_cpu_power.c
+@@ -0,0 +1,223 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * NCC CPU power management via SCMI Power Domain protocol.
++ *
++ * On NCC targets (e.g. Nord), secondary CPU cores (cores 1–17) and clusters
++ * are brought up and torn down by the CPUCP co-processor firmware.  TF-A
++ * communicates with CPUCP using the SCMI Power Domain Management Protocol
++ * (SCMI spec §14, protocol ID 0x11).
++ *
++ * Core 0 is brought up by the Primary Boot Loader (PBL) and is never
++ * powered on via SCMI.
++ *
++ * This file implements the NCC CPU power API for TF-A using the ARM CSS SCMI
++ * stack (drivers/arm/css/scmi/scmi_pwr_dmn_proto.c).  The ARM CSS layer
++ * handles mailbox layout, channel locking, doorbell signalling, and response
++ * polling.  This file only needs to:
++ *   1. Obtain the QTI SCMI channel (qti_scmi_get_channel).
++ *   2. Map MPIDR → SCMI domain_id via NCC_SCMI_DOMAIN_ID() from
++ *      ncc_cpu_power.h.
++ *   3. Call scmi_pwr_state_set / scmi_pwr_state_get with
++ *      NCC_SCMI_PWR_STATE_ON / NCC_SCMI_PWR_STATE_OFF.
++ *
++ * Power state encoding (SCMI spec §14.4.4, level-type):
++ *   NCC_SCMI_PWR_STATE_ON  = 0x0  (level 0 = powered on)
++ *   NCC_SCMI_PWR_STATE_OFF = 0x1  (level 1 = powered off)
++ *   (defined in plat/qti/cpu/ncc/include/ncc_cpu_power.h)
++ *
++ * Note: SCMI_PWR_STATE_OFF = BIT_32(30) in scmi.h is the composite-state
++ * type bit and must NOT be used for CPUCP power state commands.
++ *
++ * Exported symbols (declared in ncc_cpu_power.h):
++ *   cpucp_cluster_core_power_on()       – PSCI CPU_ON path (cores 1–17)
++ *   cpucp_cluster_core_power_off()      – PSCI CPU_OFF / suspend path
++ *   cpucp_get_cluster_core_power_info() – query current power state
++ *   cpuss_pwron_lib_init()              – initialise SCMI channel at boot
++ *
++ * Reference:
++ *   cpucp/hostlib/host_v2/init/common/scmi_power.c
++ */
++
++#include <assert.h>
++#include <stdint.h>
++
++#include <arch_helpers.h>
++#include <common/debug.h>
++
++/*
++ * ARM CSS SCMI stack: provides scmi_channel_t, scmi_init(),
++ * scmi_pwr_state_set(), scmi_pwr_state_get(), and SCMI_E_SUCCESS.
++ */
++#include <drivers/arm/css/scmi.h>
++
++/*
++ * NCC CPU power API declarations and SCMI power state / domain ID
++ * definitions for this module.
++ *   NCC_SCMI_PWR_STATE_ON  = 0U
++ *   NCC_SCMI_PWR_STATE_OFF = 1U
++ *   NCC_SCMI_DOMAIN_ID(cluster, core) = (cluster << 8) | core
++ */
++#include <ncc_cpu_power.h>
++
++/*
++ * SCMI channel handle – set by cpuss_pwron_lib_init() and used by all
++ * subsequent cpucp_cluster_core_power_* calls.
++ */
++static void *ncc_scmi_ch;
++
++/* Provided by plat/qti/common/src/qti_scmi_doorbell.c */
++void *qti_scmi_get_channel(void);
++
++/* --------------------------------------------------------------------------
++ * Public API
++ * -------------------------------------------------------------------------- */
++
++/*
++ * cpucp_cluster_core_power_on
++ *
++ * Called by the PSCI CPU_ON handler (plat_qti_pwr_domain_on in
++ * qcom_ncc_psci.c) to bring up a secondary core via CPUCP.
++ *
++ * Sends SCMI POWER_STATE_SET(domain_id, NCC_SCMI_PWR_STATE_ON) to the CPUCP
++ * firmware.  The CPUCP releases the core from reset and it enters TF-A at
++ * the warm-boot entry point.
++ *
++ * Domain ID: NCC_SCMI_DOMAIN_ID(cluster_id, core_id) = cluster_id << 8 | core_id
++ *   cluster_id = MPIDR.AFF2 (bits [23:16])
++ *   core_id    = MPIDR.AFF0 (bits  [7:0])
++ *
++ * @mpidr   MPIDR of the target core
++ * Returns  0 on success, positive SCMI error code on failure.
++ */
++uint32_t cpucp_cluster_core_power_on(uint64_t mpidr)
++{
++	uint8_t  core_id    = (uint8_t)((mpidr >> MPIDR_AFF1_SHIFT) & 
++					MPIDR_AFFLVL_MASK);
++	uint8_t  cluster_id = (uint8_t)((mpidr >> MPIDR_AFF2_SHIFT) &
++					MPIDR_AFFLVL_MASK);
++	uint32_t domain_id  = NCC_SCMI_DOMAIN_ID(cluster_id, core_id);
++	int ret;
++
++	assert(ncc_scmi_ch != NULL);
++
++	VERBOSE("NCC: SCMI CPU-ON  cluster=%u core=%u domain=0x%x\n",
++		cluster_id, core_id, domain_id);
++
++	ret = scmi_pwr_state_set(ncc_scmi_ch, domain_id, NCC_SCMI_PWR_STATE_ON);
++	if (ret != SCMI_E_SUCCESS) {
++		ERROR("NCC: SCMI CPU-ON failed cluster=%u core=%u ret=%d\n",
++		      cluster_id, core_id, ret);
++		return (uint32_t)(-ret);
++	}
++
++	return 0U;
++}
++
++/*
++ * cpucp_cluster_core_power_off
++ *
++ * Called by the PSCI CPU_OFF / suspend handler (plat_qti_pwr_domain_off
++ * and plat_qti_pwr_domain_suspend in qcom_ncc_psci.c) to power down a
++ * core via CPUCP.
++ *
++ * Sends SCMI POWER_STATE_SET(domain_id, NCC_SCMI_PWR_STATE_OFF) to the CPUCP
++ * firmware.  The CPUCP gates the core's power rail / clocks after the core
++ * executes WFI.
++ *
++ * @mpidr   MPIDR of the calling core
++ * Returns  0 on success, positive SCMI error code on failure.
++ */
++uint32_t cpucp_cluster_core_power_off(uint64_t mpidr)
++{
++	uint8_t  core_id    = (uint8_t)((mpidr >> MPIDR_AFF1_SHIFT) & 
++					MPIDR_AFFLVL_MASK);
++	uint8_t  cluster_id = (uint8_t)((mpidr >> MPIDR_AFF2_SHIFT) &
++					MPIDR_AFFLVL_MASK);
++	uint32_t domain_id  = NCC_SCMI_DOMAIN_ID(cluster_id, core_id);
++	int ret;
++
++	assert(ncc_scmi_ch != NULL);
++
++	VERBOSE("NCC: SCMI CPU-OFF cluster=%u core=%u domain=0x%x\n",
++		cluster_id, core_id, domain_id);
++
++	ret = scmi_pwr_state_set(ncc_scmi_ch, domain_id, NCC_SCMI_PWR_STATE_OFF);
++	if (ret != SCMI_E_SUCCESS) {
++		ERROR("NCC: SCMI CPU-OFF failed cluster=%u core=%u ret=%d\n",
++		      cluster_id, core_id, ret);
++		return (uint32_t)(-ret);
++	}
++
++	return 0U;
++}
++
++/*
++ * cpucp_get_cluster_core_power_info
++ *
++ * Query the current SCMI power state of a core from the CPUCP firmware.
++ * Uses SCMI POWER_STATE_GET (scmi_pwr_state_get from scmi_pwr_dmn_proto.c).
++ *
++ * @mpidr   MPIDR of the target core
++ * @state   Output: NCC_SCMI_PWR_STATE_ON (0) or NCC_SCMI_PWR_STATE_OFF (1)
++ * Returns  0 on success, positive SCMI error code on failure.
++ */
++uint32_t cpucp_get_cluster_core_power_info(uint64_t mpidr, uint32_t *state)
++{
++	uint8_t  core_id    = (uint8_t)((mpidr >> MPIDR_AFF1_SHIFT) & 
++					MPIDR_AFFLVL_MASK);
++	uint8_t  cluster_id = (uint8_t)((mpidr >> MPIDR_AFF2_SHIFT) &
++					MPIDR_AFFLVL_MASK);
++	uint32_t domain_id  = NCC_SCMI_DOMAIN_ID(cluster_id, core_id);
++	int ret;
++
++	assert(ncc_scmi_ch != NULL);
++	assert(state != NULL);
++
++	ret = scmi_pwr_state_get(ncc_scmi_ch, domain_id, state);
++	if (ret != SCMI_E_SUCCESS) {
++		ERROR("NCC: SCMI PWR-GET failed cluster=%u core=%u ret=%d\n",
++		      cluster_id, core_id, ret);
++		return (uint32_t)(-ret);
++	}
++
++	return 0U;
++}
++
++static int qti_cpu_scmi_protocol_init(scmi_channel_t *ch)
++{
++	int ret;
++
++	ret = scmi_pwr_init(ch);
++	if (ret != 0) {
++		return ret;
++	}
++
++	return ret;
++}
++
++/*
++ * cpuss_pwron_lib_init
++ *
++ * Initialise the NCC SCMI Power Domain channel.  Must be called once
++ * during platform setup (from plat_qti_pwr_psci_init in qcom_ncc_psci.c)
++ * before any cpucp_cluster_core_power_* call.
++ *
++ * Obtains the QTI SCMI channel (configured with the CPUCP mailbox base
++ * address QTI_SCMI_MBX_MEM_BASE and doorbell register QTI_SCMI_DB_REG_ADDR
++ * from platform_def.h) and calls scmi_init() to initialise the ARM CSS SCMI
++ * channel infrastructure.
++ */
++void cpuss_pwron_lib_init(void)
++{
++	scmi_channel_t *ch = (scmi_channel_t *)qti_scmi_get_channel();
++
++	assert(ch != NULL);
++
++	ncc_scmi_ch = scmi_init(ch, qti_cpu_scmi_protocol_init);
++	assert(ncc_scmi_ch != NULL);
++
++	INFO("NCC: CPUCP SCMI Power Domain channel ready\n");
++}
+diff --git a/plat/qti/cpu/ncc/src/qcom_ncc_psci.c b/plat/qti/cpu/ncc/src/qcom_ncc_psci.c
+new file mode 100644
+index 000000000..146f32847
+--- /dev/null
++++ b/plat/qti/cpu/ncc/src/qcom_ncc_psci.c
+@@ -0,0 +1,550 @@
++/*
++ * Copyright (c) 2023-2025, ARM Limited and Contributors. All rights reserved.
++ * Copyright (c) 2023-2025, Qualcomm Technologies, Inc. All rights reserved.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ */
++
++/*
++ * NCC PSCI platform hooks.
++ *
++ * Implements the plat_qti_pwr_* interface consumed by
++ * plat/qti/common/src/qti_pm.c.  All CPU and cluster power transitions use
++ * the SCMI Power Domain Management Protocol via the CPUCP HostLib wrappers
++ * (cpucp_cluster_core_power_on / cpucp_cluster_core_power_off).  NCC LPM
++ * register programming is kept here as it is NCC-hardware-specific.
++ *
++ * Reference SCMI implementation:
++ *   cpucp/hostlib/host_v2/init/common/scmi_power.c
++ *
++ * Integration with qti_pm.c:
++ *   qti_pm.c owns the plat_psci_ops_t table and plat_setup_psci_ops().
++ *   This file provides the platform-specific back-end that qti_pm.c calls
++ *   through the plat_qti_pwr_* function pointers declared in qti_plat.h.
++ */
++
++#include <arch_helpers.h>
++#include <assert.h>
++#include <stdbool.h>
++#include <string.h>
++
++#include <common/debug.h>
++#include <lib/mmio.h>
++#include <lib/psci/psci.h>
++
++#include <platform_def.h>
++#include <qti_cpu.h>
++#include <qti_plat.h>
++
++#include <drivers/arm/gicv3.h>
++#include <lib/spinlock.h>
++#include <ncc_cpu_power.h>
++#include <ncc_hwio.h>
++
++/*
++ * PSCI extended power-state encoding helpers.
++ *
++ * Bits [15:0]  = StateID  (NCC state packed as level-0 | level-1 << 4)
++ * Bit  [16]    = StateType (0 = standby, 1 = powerdown)
++ * Bits [27:24] = PowerLevel
++ */
++#define NCC_PSTATE_TYPE_SHIFT		16U
++#define NCC_PSTATE_LVL_SHIFT		24U
++#define NCC_PSTATE(state_id, lvl) \
++	(((state_id) & 0xFFFFU) | (1U << NCC_PSTATE_TYPE_SHIFT) | \
++	 ((lvl) << NCC_PSTATE_LVL_SHIFT))
++
++/*
++ * NCC state IDs packed for the QTI validate_power_state parser.
++ * qti_pm.c extracts QTI_LOCAL_PSTATE_WIDTH (4) bits per power level:
++ *   pwr_domain_state[0] = state_id & 0xF          (core state)
++ *   pwr_domain_state[1] = (state_id >> 4) & 0xF   (cluster state)
++ */
++#define NCC_STATEID_C3		(STATE_C3)
++#define NCC_STATEID_C4		(STATE_C4)
++#define NCC_STATEID_CL4		(STATE_C4 | (STATE_CL4 << QTI_LOCAL_PSTATE_WIDTH))
++#define NCC_STATEID_CL5		(STATE_C4 | (STATE_CL5 << QTI_LOCAL_PSTATE_WIDTH))
++
++/* --------------------------------------------------------------------------
++ * Per-cluster LPM vote counters
++ *
++ * cl4_count[i] / cl5_count[i] track how many cores in physical cluster i
++ * have voted for CL4 / CL5.  A cluster may enter CL4/CL5 only when every
++ * currently-ON core has voted.  Cores that are OFF are pre-counted so the
++ * threshold is met as soon as all ON cores vote.
++ * -------------------------------------------------------------------------- */
++
++/*
++ * Spin lock protecting the NCC LPM vote counters (cl4_count / cl5_count)
++ * against concurrent access from multiple TF-A CPU contexts.
++ * Static zero-initialisation is sufficient; spin_lock() / spin_unlock()
++ * require no explicit init call.
++ */
++static spinlock_t ncc_pm_lock;
++
++static int cl4_count[PLAT_CLUSTER_COUNT];
++static int cl5_count[PLAT_CLUSTER_COUNT];
++
++/* --------------------------------------------------------------------------
++ * NCC LPM register helpers
++ * -------------------------------------------------------------------------- */
++
++/*
++ * ncc_config_core_lpm - enable/disable C3/C4 LPM permission for a core.
++ *
++ * @cpu_id      physical core index (will be masked to per-cluster index)
++ * @state_id    STATE_C3 or STATE_C4
++ * @addr_offset cluster register base offset (cluster_id * NCC_CLUSTER_STRIDE)
++ * @enable      1 = allow LPM entry, 0 = disallow
++ */
++static void ncc_config_core_lpm(uint8_t cpu_id, plat_local_state_t state_id,
++				uint64_t addr_offset, uint8_t enable)
++{
++	uint64_t val;
++
++	cpu_id = cpu_id % PLAT_CORE_COUNT_PER_CLUSTER;
++
++	switch (state_id) {
++	case STATE_C4:
++		val = mmio_read_64((unsigned long)(
++			NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset));
++		if (enable)
++			val |= (((0x1 << cpu_id) & OK2ENTERC4_MASK)
++				<< OK2ENTERC4_SHIFT);
++		else
++			val &= ~(((0x1 << cpu_id) & OK2ENTERC4_MASK)
++				 << OK2ENTERC4_SHIFT);
++		mmio_write_64(NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset,
++			      val);
++		[[fallthrough]];
++	case STATE_C3:
++		val = mmio_read_64((unsigned long)(
++			NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset));
++		if (enable)
++			val |= (((0x1 << cpu_id) & OK2ENTERC3_MASK)
++				<< OK2ENTERC3_SHIFT);
++		else
++			val &= ~(((0x1 << cpu_id) & OK2ENTERC3_MASK)
++				 << OK2ENTERC3_SHIFT);
++		mmio_write_64(NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset,
++			      val);
++		break;
++	default:
++		break;
++	}
++}
++
++/*
++ * ncc_config_cluster_lpm - enable/disable CL4/CL5 LPM permission for a
++ * cluster.
++ *
++ * @state_id    STATE_CL4 or STATE_CL5
++ * @addr_offset cluster register base offset
++ * @enable      1 = allow LPM entry, 0 = disallow
++ *
++ * CL4 also requires CL3 to be enabled; both bits are managed together.
++ * CL5 falls through to CL4 so both levels are configured atomically.
++ */
++static void ncc_config_cluster_lpm(plat_local_state_t state_id,
++				   uint64_t addr_offset, uint8_t enable)
++{
++	uint64_t val;
++
++	switch (state_id) {
++	case STATE_CL5:
++		val = mmio_read_64((unsigned long)(
++			NCC0_NCC_NCC_ARCH_0_NCC_BOOT_CFG1 + addr_offset));
++		if (enable)
++			val |= ((0x1 & OK2ENTERCL5_MASK) << OK2ENTERCL5_SHIFT);
++		else
++			val &= ~((0x1 & OK2ENTERCL5_MASK) << OK2ENTERCL5_SHIFT);
++		mmio_write_64(NCC0_NCC_NCC_ARCH_0_NCC_BOOT_CFG1 + addr_offset,
++			      val);
++		[[fallthrough]];
++	case STATE_CL4:
++		val = mmio_read_64((unsigned long)(
++			NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset));
++		if (enable) {
++			val |= ((0x1 & OK2ENTERCL4_MASK) << OK2ENTERCL4_SHIFT);
++			/* CL3 must be enabled for CL4 to work */
++			val |= ((0x1 & OK2ENTERCL3_MASK) << OK2ENTERCL3_SHIFT);
++		} else {
++			val &= ~((0x1 & OK2ENTERCL4_MASK) << OK2ENTERCL4_SHIFT);
++			val &= ~((0x1 & OK2ENTERCL3_MASK) << OK2ENTERCL3_SHIFT);
++		}
++		mmio_write_64(NCC0_NCC_NCC_ARCH_0_NCC_PWR_CFG1 + addr_offset,
++			      val);
++		break;
++	default:
++		break;
++	}
++}
++
++/*
++ * ncc_set_core_rvbar - force/clear RVBAR fetch for a core on next power-on.
++ *
++ * When set, the core fetches its reset vector from RVBAR on the next
++ * power-on, which is required for a clean warm-boot after a full
++ * power-collapse (CL5 / suspend).
++ *
++ * @cpu_id      physical core index within the cluster
++ * @cluster_id  physical cluster index
++ * @enable      1 = force RVBAR fetch, 0 = clear
++ */
++static void ncc_set_core_rvbar(uint8_t cpu_id, uint8_t cluster_id,
++			       uint8_t enable)
++{
++	uint64_t addr_offset = (uint64_t)cluster_id * NCC_CLUSTER_STRIDE;
++	uint64_t val;
++
++	cpu_id = cpu_id % PLAT_CORE_COUNT_PER_CLUSTER;
++
++	val = mmio_read_64((unsigned long)(
++		NCC0_NCC_NCC_ARCH_0_NCC_PWR_CTL3 + addr_offset));
++	if (enable)
++		val |= (((0x1 << cpu_id) & CORFRCCPURVBAR_MASK)
++			<< CORFRCCPURVBAR_SHIFT);
++	else
++		val &= ~(((0x1 << cpu_id) & CORFRCCPURVBAR_MASK)
++			 << CORFRCCPURVBAR_SHIFT);
++	mmio_write_64(NCC0_NCC_NCC_ARCH_0_NCC_PWR_CTL3 + addr_offset, val);
++}
++
++/* --------------------------------------------------------------------------
++ * plat_qti_pwr_* hooks – called by qti_pm.c PSCI ops
++ * -------------------------------------------------------------------------- */
++
++/*
++ * plat_qti_pwr_domain_on
++ *
++ * Power on the CPU identified by @mpidr via the SCMI Power Domain Management
++ * Protocol.  cpucp_cluster_core_power_on() sends a synchronous
++ * SCMI POWER_STATE_SET(domain_id, POWER_STATE_ON) command to the CPUCP
++ * firmware, where domain_id = cluster_id << 8 | core_id.
++ *
++ * Returns PSCI_E_SUCCESS on success, PSCI_E_INTERN_FAIL on SCMI error.
++ */
++int plat_qti_pwr_domain_on(u_register_t mpidr, int core_pos)
++{
++	uint32_t ret;
++
++	(void)core_pos;
++
++	VERBOSE("NCC: SCMI power-on mpidr=0x%lx\n", mpidr);
++
++	ret = cpucp_cluster_core_power_on((uint64_t)mpidr);
++	if (ret != 0U) {
++		ERROR("NCC: SCMI power-on failed mpidr=0x%lx ret=%u\n",
++		      mpidr, ret);
++		return PSCI_E_INTERN_FAIL;
++	}
++
++	return PSCI_E_SUCCESS;
++}
++
++/*
++ * plat_qti_pwr_domain_off
++ *
++ * Power off the calling CPU via SCMI POWER_STATE_SET(OFF).  Also increments
++ * the per-cluster CL4/CL5 vote counters so that the cluster can collapse
++ * when all remaining ON cores have voted.
++ *
++ * Note: GIC CPU-interface disable and CPUPWRCTLR programming are handled
++ * by qti_pm.c (qti_node_power_off) before this call.
++ */
++void plat_qti_pwr_domain_off(const uint8_t *pwr_states)
++{
++	u_register_t mpidr = read_mpidr_el1();
++	uint32_t cluster_id = find_cluster_id();
++	uint32_t ret;
++
++	(void)pwr_states;
++
++	/*
++	 * Account for this core going offline in the cluster vote counters.
++	 * This allows the cluster to enter CL4/CL5 when all remaining ON
++	 * cores vote for it.
++	 */
++	spin_lock(&ncc_pm_lock);
++	++cl4_count[cluster_id];
++	++cl5_count[cluster_id];
++	spin_unlock(&ncc_pm_lock);
++
++	/* Quiesce the GIC redistributor before power-off (GICv3) */
++	gicv3_rdistif_off(plat_my_core_pos());
++
++	VERBOSE("NCC: SCMI power-off mpidr=0x%lx\n", mpidr);
++
++	/*
++	 * SCMI POWER_STATE_SET(OFF) – informs CPUCP firmware that this core
++	 * is powering down.  The CPUCP manages the actual rail/clock gating.
++	 */
++	ret = cpucp_cluster_core_power_off((uint64_t)mpidr);
++	if (ret != 0U) {
++		ERROR("NCC: SCMI power-off failed mpidr=0x%lx ret=%u\n",
++		      mpidr, ret);
++		assert(false);
++	}
++}
++
++/*
++ * plat_qti_pwr_domain_on_finish
++ *
++ * Called on the waking core after a CPU_ON power-on.  Decrements the
++ * per-cluster CL4/CL5 vote counters to reflect that this core is now ON,
++ * then re-initialises the GIC redistributor and CPU interface.
++ *
++ * Note: plat_qti_gic_cpuif_enable() is called by qti_pm.c after this
++ * function returns.
++ */
++void plat_qti_pwr_domain_on_finish(int core_pos, const uint8_t *pwr_states)
++{
++	uint8_t cluster_id = (uint8_t)find_cluster_id();
++
++	(void)core_pos;
++	(void)pwr_states;
++
++	spin_lock(&ncc_pm_lock);
++	--cl4_count[cluster_id];
++	--cl5_count[cluster_id];
++	spin_unlock(&ncc_pm_lock);
++
++	/*
++	 * Re-initialise the GIC redistributor for this core (GICv3).
++	 * plat_qti_gic_cpuif_enable() is called by qti_pm.c after this
++	 * function returns.
++	 */
++	plat_qti_gic_pcpu_init();
++}
++
++/*
++ * plat_qti_pwr_domain_suspend
++ *
++ * Prepare the calling CPU for a power-collapse suspend.
++ *
++ * Steps:
++ *  1. Program NCC LPM permission bits for the requested C-state.
++ *  2. Increment per-cluster CL4/CL5 vote counters.
++ *  3. Force RVBAR fetch on next wake so the core re-enters TF-A warm-boot.
++ *  4. Enable cluster LPM when all cores in the cluster have voted.
++ *  5. Send SCMI POWER_STATE_SET(OFF) to inform CPUCP of the impending
++ *     power-collapse.
++ *
++ * Note: GIC CPU-interface disable and CPUPWRCTLR programming are handled
++ * by qti_pm.c (qti_node_suspend) before this call when the core state is
++ * QTI_LOCAL_STATE_OFF / DEEPOFF (i.e. STATE_C3 / STATE_C4).
++ */
++void plat_qti_pwr_domain_suspend(const uint8_t *pwr_states)
++{
++	u_register_t mpidr = read_mpidr_el1();
++	uint8_t cpu_id = (uint8_t)plat_core_pos_by_mpidr(mpidr);
++	uint8_t cluster_id = (uint8_t)find_cluster_id();
++	uint64_t addr_offset = (uint64_t)cluster_id * NCC_CLUSTER_STRIDE;
++	plat_local_state_t cpu_state =
++		(plat_local_state_t)pwr_states[QTI_PWR_LVL0];
++	uint32_t ret;
++
++	VERBOSE("NCC: suspend cpu=%u cluster=%u cpu_state=%u\n",
++		cpu_id, cluster_id, cpu_state);
++
++	spin_lock(&ncc_pm_lock);
++
++	/* Program core LPM permission bits (C3 or C4) */
++	ncc_config_core_lpm(cpu_id, cpu_state, addr_offset, 1U);
++
++	/* Track cluster-level votes */
++	++cl5_count[cluster_id];
++	++cl4_count[cluster_id];
++
++	/*
++	 * Force RVBAR fetch on next wake so the core re-enters TF-A
++	 * warm-boot path after a full power-collapse.
++	 */
++	ncc_set_core_rvbar(cpu_id, cluster_id, 1U);
++
++	/*
++	 * Enable cluster LPM when all cores in the physical cluster have
++	 * voted.  Prefer CL5 over CL4 when all cores have voted for CL5.
++	 */
++	if (cl5_count[cluster_id] == PLAT_CORE_COUNT_PER_CLUSTER)
++		ncc_config_cluster_lpm(STATE_CL5, addr_offset, 1U);
++	else if (cl4_count[cluster_id] == PLAT_CORE_COUNT_PER_CLUSTER)
++		ncc_config_cluster_lpm(STATE_CL4, addr_offset, 1U);
++
++	spin_unlock(&ncc_pm_lock);
++
++	/*
++	 * SCMI POWER_STATE_SET(OFF) – informs CPUCP that this core is about
++	 * to enter a power-collapse.  The CPUCP manages cluster rail/clock
++	 * gating based on the aggregated core votes.
++	 */
++	ret = cpucp_cluster_core_power_off((uint64_t)mpidr);
++	if (ret != 0U)
++		ERROR("NCC: SCMI suspend power-off failed mpidr=0x%lx ret=%u\n",
++		      mpidr, ret);
++}
++
++/*
++ * plat_qti_pwr_domain_suspend_finish
++ *
++ * Called on the waking core after a suspend.
++ *
++ * Steps:
++ *  1. Clear the RVBAR-force bit so normal execution resumes.
++ *  2. Tear down cluster LPM if this is the first core waking in the cluster.
++ *  3. Decrement per-cluster CL4/CL5 vote counters.
++ *  4. Deconfigure core LPM permission bits.
++ *
++ * Note: plat_qti_gic_cpuif_enable() is called by qti_pm.c after this
++ * function returns when the core state was QTI_LOCAL_STATE_OFF / DEEPOFF.
++ */
++void plat_qti_pwr_domain_suspend_finish(const uint8_t *pwr_states)
++{
++	u_register_t mpidr = read_mpidr_el1();
++	uint8_t cluster_id = (uint8_t)find_cluster_id();
++	uint64_t addr_offset = (uint64_t)cluster_id * NCC_CLUSTER_STRIDE;
++	uint8_t cpu_id = (uint8_t)(plat_core_pos_by_mpidr(mpidr) %
++				   PLAT_CORE_COUNT_PER_CLUSTER);
++	plat_local_state_t cpu_state =
++		(plat_local_state_t)pwr_states[QTI_PWR_LVL0];
++
++	spin_lock(&ncc_pm_lock);
++
++	/* Clear RVBAR-force so normal execution resumes after warm-boot */
++	ncc_set_core_rvbar(cpu_id, cluster_id, 0U);
++
++	/*
++	 * Tear down cluster LPM if we are the first core waking.
++	 * Check before decrementing so the threshold comparison is correct.
++	 */
++	if (cl5_count[cluster_id] == PLAT_CORE_COUNT_PER_CLUSTER)
++		ncc_config_cluster_lpm(STATE_CL5, addr_offset, 0U);
++	else if (cl4_count[cluster_id] == PLAT_CORE_COUNT_PER_CLUSTER)
++		ncc_config_cluster_lpm(STATE_CL4, addr_offset, 0U);
++
++	/* Decrement vote counters now that this core is back online */
++	--cl5_count[cluster_id];
++	--cl4_count[cluster_id];
++
++	/* Deconfigure core LPM permission bits */
++	ncc_config_core_lpm(cpu_id, cpu_state, addr_offset, 0U);
++
++	spin_unlock(&ncc_pm_lock);
++}
++
++/* --------------------------------------------------------------------------
++ * Idle state table – consumed by qti_pm.c qti_validate_power_state()
++ *
++ * All NCC LPM states are exposed as PSTATE_TYPE_POWERDOWN so they are
++ * routed through pwr_domain_suspend (which programs NCC LPM registers and
++ * sends SCMI) rather than the simple cpu_standby WFI path.
++ *
++ * State ID encoding (QTI_LOCAL_PSTATE_WIDTH = 4 bits per level):
++ *   bits [3:0]  = level-0 (core) state
++ *   bits [7:4]  = level-1 (cluster) state
++ * -------------------------------------------------------------------------- */
++
++static const unsigned int ncc_idle_states[] = {
++	/* C3 – core clock-gated, context retained */
++	NCC_PSTATE(NCC_STATEID_C3,  QTI_PWR_LVL0),
++	/* C4 – core power-collapsed */
++	NCC_PSTATE(NCC_STATEID_C4,  QTI_PWR_LVL0),
++	/* CL4 – cluster L2 power-collapsed (core C4 + cluster CL4) */
++	NCC_PSTATE(NCC_STATEID_CL4, QTI_PWR_LVL1),
++	/* CL5 – cluster fully off (core C4 + cluster CL5) */
++	NCC_PSTATE(NCC_STATEID_CL5, QTI_PWR_LVL1),
++	0U /* terminator */
++};
++
++const unsigned int *plat_qti_pm_idle_states(void)
++{
++	return ncc_idle_states;
++}
++
++/*
++ * plat_get_target_pwr_state
++ *
++ * PSCI platform hook called by psci_do_state_coordination() to determine
++ * the target power state for a power domain at level @lvl.
++ *
++ * Returns the minimum (shallowest) power state across all @ncpu entries in
++ * @states.  This ensures the cluster/system only enters a deeper state when
++ * every CPU in the domain has voted for it.
++ */
++plat_local_state_t plat_get_target_pwr_state(unsigned int lvl,
++					     const plat_local_state_t *states,
++					     unsigned int ncpu)
++{
++	plat_local_state_t target = PLAT_MAX_OFF_STATE;
++	unsigned int i;
++
++	(void)lvl;
++
++	for (i = 0U; i < ncpu; i++) {
++		if (states[i] < target)
++			target = states[i];
++	}
++
++	return target;
++}
++
++/* --------------------------------------------------------------------------
++ * PSCI initialisation
++ * -------------------------------------------------------------------------- */
++
++/*
++ * plat_qti_pwr_psci_init
++ *
++ * Called from qti_pm.c plat_setup_psci_ops().  Initialises:
++ *  - The NCC spin lock (zero-initialised by static storage; no explicit init).
++ *  - The CPUCP HostLib, which sets up the SCMI transport channel to the
++ *    CPUCP firmware (equivalent to scmi_power_init() in the reference).
++ *  - Per-cluster CL4/CL5 vote counters.
++ *
++ * Vote counter pre-loading:
++ *   Each counter is initialised to PLAT_CORE_COUNT_PER_CLUSTER so
++ *   that a cluster can enter CL4/CL5 as soon as all currently-ON cores vote,
++ *   even if some cores have never been turned on (those OFF cores are
++ *   pre-counted).  Cluster 0 is the boot cluster: one core is already
++ *   running, so its counter is decremented by one.
++ *
++ * @warm_entrypoint  BL31 warm-boot entry point address (unused here; the
++ *                   CPUCP learns the entry point via the SCMI channel).
++ *
++ * Returns PSCI_E_SUCCESS on success.
++ */
++int plat_qti_pwr_psci_init(uintptr_t warm_entrypoint)
++{
++	uint32_t i;
++
++	(void)warm_entrypoint;
++
++	/*
++	 * ncc_pm_lock is a static spinlock_t; C zero-initialisation sets
++	 * lock = 0 (unlocked).  No explicit spin_lock_init() call is needed.
++	 */
++
++	/*
++	 * Initialise the CPUCP HostLib.  This sets up the shared-memory IPC
++	 * channel used by cpucp_cluster_core_power_on/off() to send SCMI
++	 * POWER_STATE_SET commands to the CPUCP firmware.
++	 */
++	cpuss_pwron_lib_init();
++
++	/*
++	 * Pre-load vote counters.  Cores that are OFF are pre-counted so the
++	 * cluster-collapse threshold is met as soon as all ON cores vote.
++	 */
++	for (i = 0U; i < PLAT_CLUSTER_COUNT; i++) {
++		cl4_count[i] = PLAT_CORE_COUNT_PER_CLUSTER;
++		cl5_count[i] = PLAT_CORE_COUNT_PER_CLUSTER;
++	}
++
++	/* Boot cluster (cluster 0) already has one core running */
++	--cl4_count[0];
++	--cl5_count[0];
++
++	INFO("NCC: PSCI init complete – SCMI transport ready\n");
++
++	return PSCI_E_SUCCESS;
++}
+diff --git a/plat/qti/wildcat/common/inc/qti_plat.h b/plat/qti/wildcat/common/inc/qti_plat.h
+index d9bfd5475..6d05bda90 100644
+--- a/plat/qti/wildcat/common/inc/qti_plat.h
++++ b/plat/qti/wildcat/common/inc/qti_plat.h
+@@ -21,6 +21,8 @@
+ #define QTI_INVALID_CPU_ID      ((uint32_t)-1)
+ #define QTI_INVALID_MPID_ID     ((uint32_t)-1)
+ 
++#define QTI_LOCAL_PSTATE_WIDTH		4
++
+ /*
+  * Utility functions common to QTI platforms
+  */
+@@ -86,6 +88,13 @@ void gic_set_spi_routing(unsigned int id, unsigned int irm, u_register_t mpidr);
+ void qti_pmic_prepare_reset(void);
+ void qti_pmic_prepare_shutdown(void);
+ 
++int plat_qti_pwr_domain_on(u_register_t mpidr, int core_pos);
++void plat_qti_pwr_domain_on_finish(int core_pos, const uint8_t *states);
++void plat_qti_pwr_domain_off(const uint8_t *states);
++void plat_qti_pwr_domain_suspend(const uint8_t *states);
++void plat_qti_pwr_domain_suspend_finish(const uint8_t *states);
++int  plat_qti_pwr_psci_init(uintptr_t warmboot_entry);
++
+ /* Optional functions required in ARM standard platforms */
+ unsigned int plat_qcom_core_pos_by_mpidr(u_register_t mpidr);
+ unsigned int find_cluster_id(void);
+@@ -140,6 +149,11 @@ void configure_irq_type(uintptr_t clr_edge_base, uintptr_t set_level_base,
+ void configure_irq_array(uintptr_t base, const uint32_t *cfg_arr,
+ 			 unsigned int num_words);
+ 
++const unsigned int *plat_qti_pm_idle_states(void);
++
++int qti_ncc_cpu_reset_sync(uint64_t mpidr);
++
++
+ typedef struct chip_id_info {
+ 	uint16_t jtag_id;
+ 	uint16_t chipinfo_id;
+diff --git a/plat/qti/wildcat/hamoa/platform.mk b/plat/qti/wildcat/hamoa/platform.mk
+index b08d6d2b6..1733a600f 100644
+--- a/plat/qti/wildcat/hamoa/platform.mk
++++ b/plat/qti/wildcat/hamoa/platform.mk
+@@ -3,8 +3,10 @@
+ #
+ # Make for Hamoa QTI platform.
+ 
++PLAT_QTI_ROOT	:= plat/qti
+ QTI_PLAT_PATH	:= plat/qti/wildcat
+ QTI_COMMON_PATH	:= plat/qti/common
++QTI_CPU_PATH	:= plat/qti/cpu
+ CHIPSET		:= hamoa
+ PLATFORM	:= hamoa
+ 
+@@ -111,6 +113,7 @@ QTI_EXTERNAL_INCLUDES :=					\
+ 	-I${QTI_PLAT_PATH}/bl31qtilib/inc			\
+ 	-I${QTI_COMMON_PATH}/inc				\
+ 	-I${QTI_COMMON_PATH}/inc/$(ARCH)			\
++	-I${QTI_CPU_PATH}/inc					\
+ 
+ QTI_BL31_SOURCES :=						\
+ 	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+@@ -136,6 +139,7 @@ QTI_BL31_SOURCES :=						\
+ 	$(QTI_PLAT_PATH)/bl31qtilib/src/bl31qtilib_cb_interface.c \
+ 	$(QTI_PLAT_PATH)/common/src/qti_plat_helpers.c
+ 
++
+ # Ensure Widevine is not being used
+ ifeq ($(CROS_WIDEVINE_SMC),0)
+ QTI_BL31_SOURCES += $(QTI_PLAT_PATH)/common/src/qti_oem_svc.c
+@@ -186,13 +190,22 @@ $(eval $(call add_define, QTI_NO_SMCC_ARCH_SOC_ID))
+ 
+ CPU_SOURCES := $(QTI_PLAT_PATH)/common/src/aarch64/qcom_oryon_v1.S
+ 
++ifeq ($(QTI_NCC_CPU),1)
++$(eval $(call add_define,QTI_NCC_CPU))
++BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/ncc/src/bl31_cpu_setup.c
++else
++BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/arm/src/bl31_cpu_setup.c
++endif
++
+ BL31_SOURCES +=			\
+ 	${QTI_BL31_SOURCES}	\
+ 	${GIC_SOURCES}		\
+ 	${TIMER_SOURCES}	\
+-	${CPU_SOURCES}
++	${CPU_SOURCES}		\
++	${BL31_CPU_SETUP_SRC}	\
+ 
+ BL31_SOURCES += ${QGIC_DRV_PATH}/qgic_intr_el3.c
++BL31_SOURCES +=	$(QTI_PLAT_PATH)/${CHIPSET}/src/plat_cpuss_config.c
+ 
+ PLAT_INCLUDES += -Iinclude/drivers/qti/qtimer/${CHIPSET}
+ 
+diff --git a/plat/qti/wildcat/hamoa/src/plat_cpuss_config.c b/plat/qti/wildcat/hamoa/src/plat_cpuss_config.c
+new file mode 100644
+index 000000000..103e6c3fe
+--- /dev/null
++++ b/plat/qti/wildcat/hamoa/src/plat_cpuss_config.c
+@@ -0,0 +1,15 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ */
++
++#include <stdint.h>
++#include <arch_helpers.h>
++#include <qti_plat.h>
++
++int qti_ncc_cpu_reset_sync(uint64_t mpidr)
++{
++	return 0;
++}
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 0021db064..27703f3b8 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -108,10 +108,11 @@ ENABLE_BACKTRACE		:=	1
+ QTI_EXTERNAL_INCLUDES	:=	-I${QTI_PLAT_PATH}/${CHIPSET}/inc			\
+ 				-I${QTI_PLAT_PATH}/common/inc				\
+ 				-I${QTI_PLAT_PATH}/common/inc/$(ARCH)			\
++				-I${PLAT_QTI_ROOT}/common/inc				\
+ 				-I${PLAT_QTI_ROOT}/common/inc/$(ARCH)			\
+ 				-I${PLAT_QTI_ROOT}/cpu/inc				\
++				-I${PLAT_QTI_ROOT}/cpu/ncc/include			\
+ 				-I${QTI_PLAT_PATH}/bl31qtilib/inc			\
+-				-I${PLAT_QTI_ROOT}/common/inc				\
+ 				-Iinclude/drivers/qti/sec_core/${CHIPSET}		\
+ 
+ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+@@ -130,7 +131,6 @@ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+ 				$(QTI_PLAT_PATH)/common/src/qti_err_log.c		\
+ 				$(QTI_PLAT_PATH)/common/src/qti_tlb.c			\
+ 				$(QTI_PLAT_PATH)/common/src/qti_topology.c		\
+-				$(QTI_PLAT_PATH)/common/src/qti_pm.c			\
+ 				$(QTI_PLAT_PATH)/common/src/qti_rng.c			\
+ 				$(PLAT_QTI_ROOT)/common/src/spmi_arb.c			\
+ 				$(QTI_PLAT_PATH)/bl31qtilib/src/bl31qtilib_cb_interface.c	\
+@@ -138,6 +138,14 @@ QTI_BL31_SOURCES	:=	$(QTI_PLAT_PATH)/common/src/$(ARCH)/qti_helpers.S	\
+ 				drivers/qti/crypto/rng.c \
+ 				drivers/qti/sec_core/sec_core.c 			\
+ 				drivers/qti/sec_core/${CHIPSET}/sec_core_cfg.c 		\
++#
++# PSCI ops wrapper: use the common qti_pm.c which calls plat_qti_pwr_*
++# hooks implemented in plat/qti/cpu/ncc/src/qcom_ncc_psci.c.
++# (plat/qti/wildcat/common/src/qti_pm.c uses bl31qtilib_* and is NOT
++# used for NCC targets.)
++#
++QTI_BL31_SOURCES	+=	$(PLAT_QTI_ROOT)/common/src/qti_pm.c		\
++				$(PLAT_QTI_ROOT)/common/src/pm_ps_hold.c
+ 
+ 
+ # Ensure Widevine is not being used
+@@ -201,6 +209,8 @@ QTI_CPU_PATH		:=	plat/qti/cpu
+ ifeq ($(QTI_NCC_CPU),1)
+ $(eval $(call add_define,QTI_NCC_CPU))
+ BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/ncc/src/bl31_cpu_setup.c
++# NCC PSCI platform hooks (plat_qti_pwr_* back-end for qti_pm.c)
++BL31_SOURCES		+=	$(QTI_CPU_PATH)/ncc/src/qcom_ncc_psci.c
+ else
+ BL31_CPU_SETUP_SRC	:=	$(QTI_CPU_PATH)/arm/src/bl31_cpu_setup.c
+ endif
+@@ -217,8 +227,10 @@ SCMI_SKIP_SYS_PWR_PROTO_CHECK	:= 1
+ $(eval $(call add_define,SCMI_SKIP_SYS_PWR_PROTO_CHECK))
+ 
+ SCMI_SOURCES		:=	drivers/arm/css/scmi/scmi_common.c		\
++				drivers/arm/css/scmi/scmi_pwr_dmn_proto.c	\
+ 				drivers/arm/css/scmi/scmi_reset_domain_proto.c	\
+-				$(PLAT_QTI_ROOT)/common/src/qti_scmi_doorbell.c
++				$(PLAT_QTI_ROOT)/common/src/qti_scmi_doorbell.c	\
++				$(QTI_CPU_PATH)/ncc/src/ncc_cpu_power.c
+ 
+ BL31_SOURCES		+=	${QTI_BL31_SOURCES}				\
+ 				${GIC_SOURCES}					\
+@@ -227,6 +239,7 @@ BL31_SOURCES		+=	${QTI_BL31_SOURCES}				\
+ 				${BL31_CPU_SETUP_SRC}				\
+ 				${SCMI_SOURCES}
+ 
++
+ BL31_SOURCES		+=	${QGIC_DRV_PATH}/qgic_intr_el3.c
+ BL31_SOURCES		+=	$(QTI_PLAT_PATH)/${CHIPSET}/src/plat_cpuss_config.c
+ 
+diff --git a/plat/qti/wildcat/nord/src/plat_cpuss_config.c b/plat/qti/wildcat/nord/src/plat_cpuss_config.c
+index 6f9b1f886..bdf903151 100644
+--- a/plat/qti/wildcat/nord/src/plat_cpuss_config.c
++++ b/plat/qti/wildcat/nord/src/plat_cpuss_config.c
+@@ -6,10 +6,18 @@
+  */
+ 
+ #include <stdint.h>
+-
+ #include <arch_helpers.h>
+-
+ #include <qti_plat.h>
++#include <drivers/arm/css/scmi.h>
++
++/*
++ * Reset state encoding for the NCC CL4 workaround:
++ *   Bit 31 = IMPL_RESET (implementation-defined reset)
++ *   Bits 30:0 = CL4 (architecture-specific sleep state 4)
++ */
++#define NCC_RESET_STATE_CL4	(SCMI_RESET_STATE_IMPL | 0x4U)
++
++void *qti_scmi_get_channel(void);
+ 
+ /* INTU base = HWIO_APSS_HM_BASE(0x17000000) + 0x840000  (NORDV2 SConscript) */
+ #define APSS_INTU_BASE			0x17840000U
+@@ -67,6 +75,80 @@ void plat_irq_config(void)
+ 			    nord_seca_direct_cfg, NUM_DIRECT_SPI_WORDS);
+ }
+ 
++/* Execute WFI. Core enters into LPM based on the LPM config */
++static void execute_wfi(void)
++{
++	asm volatile("wfi");
++}
++
++/*
++ * qti_ncc_cpu_reset_sync - Apply the NCC boot-core CL4 sleep-state reset
++ * workaround via the ARM SCMI Reset Domain Management protocol.
++ *
++ * Context: single-core, called from bl31_early_platform_setup before
++ * secondary cores are brought up.
++ *
++ * Mechanism:
++ *   1. Encode the target core as domain_id = (AFF1 << 8) | AFF0.
++ *   2. Send RESET_REQUEST (protocol 0x16, message 0x4) to CPUCP with:
++ *        flags       = AUTONOMOUS_RESET_ACTION (synchronous, autonomous)
++ *        reset_state = IMPL_RESET | CL4
++ *   3. Enter WFI.  CPUCP applies the workaround and releases the core.
++ *   4. Execution resumes from WFI+4 (the instruction after wfi).
++ *
++ * Returns 0 on success, or a negative SCMI error code on failure.
++ */
++int qti_ncc_cpu_reset_sync(uint64_t mpidr)
++{
++	void *ch;
++	uint32_t domain_id;
++	uint32_t flags;
++	uint32_t reset_state;
++	int ret;
++	uint8_t core_id    = (uint8_t)MPIDR_AFFLVL0_VAL(mpidr);
++	uint8_t cluster_id = (uint8_t)MPIDR_AFFLVL1_VAL(mpidr);
++
++	ch = qti_scmi_get_channel();
++	if (ch == NULL) {
++		ERROR("NCC: failed to get SCMI channel\n");
++		return -1;
++	}
++
++	/*
++	 * Encode the target reset domain as CPUCP expects:
++	 *   bits [15:8] = cluster index (MPIDR AFF1)
++	 *   bits  [7:0] = core index within the cluster (MPIDR AFF0)
++	 */
++	domain_id = ((uint32_t)cluster_id << 8U) | (uint32_t)core_id;
++
++	/*
++	 * flags: Bit[0] = AUTONOMOUS_ACTION = 1 (platform drives the sequence),
++	 *        Bit[2] = ASYNC_FLAG = 0 (synchronous).
++	 * Per DEN0056F §3.8.2.6: Bit[0] = Autonomous Reset action.
++	 */
++	flags = SCMI_RESET_FLAG_SYNC | SCMI_RESET_FLAG_AUTONOMOUS;
++
++	/*
++	 * reset_state: IMPL_RESET | CL4.
++	 * CPUCP interprets this as "apply the CL4 workaround for this core".
++	 */
++	reset_state = NCC_RESET_STATE_CL4;
++
++	ret = scmi_reset_domain_request(ch, domain_id, flags, reset_state);
++	if (ret != SCMI_E_SUCCESS) {
++		ERROR("NCC: SCMI reset domain request failed: %d\n", ret);
++		return ret;
++	}
++
++	/*
++	 * SCMI command acknowledged.  Enter WFI; CPUCP applies the workaround
++	 * and releases the core.  Execution resumes here (WFI+4).
++	 */
++	execute_wfi();
++
++	return 0;
++}
++
+ /*
+  * plat_cpuss_config - Platform CPUSS-specific configuration.
+  *
+@@ -83,4 +165,4 @@ void plat_cpuss_config(void)
+ {
+ 	/* SPI interrupt edge/level configuration */
+ 	plat_irq_config();
+-}
+\ No newline at end of file
++}
+-- 
+2.43.0
+

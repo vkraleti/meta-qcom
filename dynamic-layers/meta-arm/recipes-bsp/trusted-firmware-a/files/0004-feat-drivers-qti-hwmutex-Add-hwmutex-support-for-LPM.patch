@@ -1,0 +1,738 @@
+From 712c663dacd119bd5741852e350c04b4822e63bc Mon Sep 17 00:00:00 2001
+From: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Date: Wed, 21 Oct 2026 21:09:40 +0530
+Subject: [PATCH 4/4] feat(drivers/qti/hwmutex) Add hwmutex support for LPM
+ sync
+
+Signed-off-by: Murali Mohan T D <mmtd@qti.qualcomm.com>
+Upstream-Status: Pending
+---
+ drivers/qti/hwmutex/hwm_lock.c              | 147 ++++++++++++++++++++
+ drivers/qti/hwmutex/hwmutex.c               | 106 ++++++++++++++
+ drivers/qti/hwmutex/hwmutex.h               | 126 +++++++++++++++++
+ drivers/qti/hwmutex/hwmutex.mk              |  27 ++++
+ include/drivers/qti/cpucp/nord/cpucp_hwio.h |   4 +-
+ include/drivers/qti/hwmutex/hwm_lock.h      |  57 ++++++++
+ include/drivers/qti/hwmutex/hwmutex.h       | 126 +++++++++++++++++
+ plat/qti/cpu/ncc/src/qcom_ncc_psci.c        |   1 +
+ plat/qti/wildcat/nord/inc/cpucp_shared.h    |  28 ++++
+ plat/qti/wildcat/nord/platform.mk           |   2 +
+ 10 files changed, 623 insertions(+), 1 deletion(-)
+ create mode 100755 drivers/qti/hwmutex/hwm_lock.c
+ create mode 100644 drivers/qti/hwmutex/hwmutex.c
+ create mode 100644 drivers/qti/hwmutex/hwmutex.h
+ create mode 100644 drivers/qti/hwmutex/hwmutex.mk
+ create mode 100644 include/drivers/qti/hwmutex/hwm_lock.h
+ create mode 100644 include/drivers/qti/hwmutex/hwmutex.h
+ create mode 100755 plat/qti/wildcat/nord/inc/cpucp_shared.h
+
+diff --git a/drivers/qti/hwmutex/hwm_lock.c b/drivers/qti/hwmutex/hwm_lock.c
+new file mode 100755
+index 000000000..b1032aeff
+--- /dev/null
++++ b/drivers/qti/hwmutex/hwm_lock.c
+@@ -0,0 +1,147 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * Ticket-lock and LPM-sync lock implementation using the TF-A hwmutex driver.
++ *
++ * The hardware mutex (hwmutex) is used only to make the read-modify-write of
++ * the ticket counter atomic across CPUs.  The actual mutual exclusion for the
++ * critical section is provided by the ticket-lock spin loop.
++ *
++ * Ported from CPUCP hwm_lock.c:
++ *   hw_mutex_acquire(id) / hw_mutex_release(id)
++ *     → hwmutex_acquire(&handle) / hwmutex_release(&handle)
++ *   __asm__ volatile ("dsb ish" ::: "memory")
++ *     → dsbish()  (from <arch_helpers.h>)
++ *   busywait(us)
++ *     → udelay(us)  (from <drivers/delay_timer.h>)
++ */
++
++#include <stdint.h>
++
++#include <arch_helpers.h>
++#include <drivers/delay_timer.h>
++#include <drivers/qti/hwmutex/hwmutex.h>
++
++/*
++ * Chipset-specific CPUCP hardware register addresses.
++ * Provides CPU_LPM_SYNC_DATA_BASE (shared SRAM base for per-core LPM status).
++ * The include path -Iinclude/drivers/qti/cpucp/<chipset> is set by platform.mk.
++ */
++#include <cpucp_hwio.h>
++#include <cpucp_shared.h>
++
++#define CPUCP_LPMSYNC_DELAY	100U	/* microseconds */
++
++volatile uint32_t *lpm_status = (uint32_t *)CPU_LPM_SYNC_DATA_BASE;
++
++/*
++ * Static HW mutex handles.
++ *
++ * Statically initialised to avoid a separate init call: hwmutex_init() only
++ * assigns mutex_id, so direct struct initialisation is equivalent.
++ */
++static hwmutex_t hwm_atomics = { .mutex_id = HW_MUTEX_S_ATOMICS };
++static hwmutex_t hwm_lpm     = { .mutex_id = HW_MUTEX_S_LPM };
++
++struct ticket_lock {
++	volatile unsigned int next_ticket;
++	volatile unsigned int current_ticket;
++};
++
++/*
++ * hwm_lock - acquire the ticket lock.
++ *
++ * Uses the HW mutex to atomically read-and-increment next_ticket, then spins
++ * until current_ticket reaches our ticket number.  Issues DSB ISH after the
++ * spin to order subsequent critical-section memory accesses.
++ */
++void hwm_lock(void *lock)
++{
++	struct ticket_lock *l1 = (struct ticket_lock *)lock;
++	unsigned int my_ticket;
++
++	/*
++	 * Acquire HW mutex to make the next_ticket read-modify-write atomic.
++	 * hwmutex_acquire() issues DSB ISH after the hardware grants ownership.
++	 */
++	hwmutex_acquire(&hwm_atomics);
++
++	my_ticket = l1->next_ticket;
++	l1->next_ticket++;
++
++	/*
++	 * Release HW mutex.
++	 * hwmutex_release() issues DSB ISH before writing 0 to the register.
++	 */
++	hwmutex_release(&hwm_atomics);
++
++	/* Spin until our ticket becomes the current ticket */
++	while (l1->current_ticket != my_ticket)
++		;
++
++	/*
++	 * Barrier: ensure all critical-section memory accesses happen
++	 * strictly after the ticket lock is acquired.
++	 */
++	dsbish();
++}
++
++/*
++ * hwm_unlock - release the ticket lock.
++ *
++ * Issues DSB ISH to complete all critical-section memory accesses, then
++ * advances current_ticket to wake the next waiter.
++ */
++void hwm_unlock(void *lock)
++{
++	struct ticket_lock *l1 = (struct ticket_lock *)lock;
++
++	/*
++	 * Barrier: ensure all critical-section memory accesses complete
++	 * before releasing the ticket lock.
++	 */
++	dsbish();
++
++	/* Give the next waiter a turn */
++	l1->current_ticket++;
++}
++
++/*
++ * acquire_lpm_lock - acquire the per-core LPM synchronisation lock.
++ *
++ * Spins under the HW mutex until the core's LPM status slot is free
++ * (CORE_NOT_IN_LPM), then marks it as CORE_IN_LPM and returns.
++ * Backs off with a short delay between retries to reduce bus contention.
++ */
++void acquire_lpm_lock(uint8_t core_id)
++{
++	do {
++		hwmutex_acquire(&hwm_lpm);
++
++		if (lpm_status[core_id] == CORE_NOT_IN_LPM) {
++			lpm_status[core_id] = CORE_IN_LPM;
++			hwmutex_release(&hwm_lpm);
++			break;
++		}
++
++		hwmutex_release(&hwm_lpm);
++
++		udelay(CPUCP_LPMSYNC_DELAY);
++
++	} while (1);
++}
++
++/*
++ * release_lpm_lock - release the per-core LPM synchronisation lock.
++ *
++ * Clears the core's LPM status slot back to CORE_NOT_IN_LPM under the
++ * HW mutex so that other cores see a consistent update.
++ */
++void release_lpm_lock(uint8_t core_id)
++{
++	hwmutex_acquire(&hwm_lpm);
++	lpm_status[core_id] = CORE_NOT_IN_LPM;
++	hwmutex_release(&hwm_lpm);
++}
+diff --git a/drivers/qti/hwmutex/hwmutex.c b/drivers/qti/hwmutex/hwmutex.c
+new file mode 100644
+index 000000000..7208b2e27
+--- /dev/null
++++ b/drivers/qti/hwmutex/hwmutex.c
+@@ -0,0 +1,106 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * Hardware Mutex (HWMUTEX) driver for TF-A.
++ *
++ * Ported from CPUCP modules_v2/hwmutex/src/hwmutex.c with TF-A adaptations:
++ *   - ioread32 / iowrite32  →  mmio_read_32 / mmio_write_32
++ *   - cpu_get_logical_cpu_num()  →  plat_my_core_pos()
++ *   - inline "dsb ish"  →  dsbish() from <arch_helpers.h>
++ *   - APSS_CPUCP_S_MUTEX_BASE from platform_def.h / cpucp_hwio.h
++ *
++ * Only the secure HW mutex bank (region 0) is used by TF-A.  The mutex
++ * used for NCC LPM vote-counter protection is HW_MUTEX_S_LPM (0x0004).
++ *
++ * APSS_CPUCP_S_MUTEX_BASE must be defined before including this file,
++ * either in platform_def.h or include/drivers/qti/cpucp/<chipset>/cpucp_hwio.h.
++ */
++
++#include <arch_helpers.h>
++#include <lib/mmio.h>
++#include <platform.h>
++
++/*
++ * Chipset-specific CPUCP hardware register addresses.
++ * Provides APSS_CPUCP_S_MUTEX_BASE (secure HW mutex bank base address).
++ * The include path -Iinclude/drivers/qti/cpucp/<chipset> is set by platform.mk.
++ */
++#include <cpucp_hwio.h>
++
++#include <drivers/qti/hwmutex/hwmutex.h>
++
++#ifndef APSS_CPUCP_S_MUTEX_BASE
++#error "APSS_CPUCP_S_MUTEX_BASE is not defined in cpucp_hwio.h. " \
++       "Add it to include/drivers/qti/cpucp/<chipset>/cpucp_hwio.h."
++#endif
++
++/*
++ * hwmutex_init - initialise a hardware mutex handle.
++ *
++ * Records the HW_MUTEX_* ID for use by acquire/release.
++ */
++void hwmutex_init(hwmutex_t *mutex, uint32_t mutex_id)
++{
++	mutex->mutex_id = mutex_id;
++}
++
++/*
++ * hwmutex_acquire - acquire the hardware mutex (APPS_TZ side).
++ *
++ * Algorithm (from CPUCP hwmutex.c):
++ *   1. Build a non-zero key:
++ *        bits[31:24] = HWMUTEX_SUBSYS_APPS_TZ (0x2)
++ *        bits[23:8]  = mutex_id
++ *        bits[7:0]   = logical CPU number
++ *   2. Write key to the mutex register.
++ *   3. Read back; if the value matches the key, ownership is granted.
++ *      Otherwise another subsystem holds the mutex – retry from step 2.
++ *   4. Issue DSB ISH to order subsequent memory accesses after the grant.
++ *
++ * Note: only the secure bank (region 0, APSS_CPUCP_S_MUTEX_BASE) is used.
++ */
++void hwmutex_acquire(hwmutex_t *mutex)
++{
++	uint32_t mutex_id  = mutex->mutex_id;
++	uint32_t mutex_num = (mutex_id >> HWMUTEX_NUM_SHIFT) & HWMUTEX_NUM_MASK;
++	uint32_t cpu_num   = (uint32_t)plat_my_core_pos();
++	uint32_t key =
++		((HWMUTEX_SUBSYS_APPS_TZ & HWMUTEX_SUBSYS_MASK) << HWMUTEX_SUBSYS_SHIFT) |
++		((mutex_id & HWMUTEX_ID_MASK) << HWMUTEX_ID_SHIFT) |
++		((cpu_num  & HWMUTEX_CPU_MASK) << HWMUTEX_CPU_SHIFT);
++	uintptr_t reg_addr = APSS_CPUCP_S_MUTEX_BASE +
++			     (mutex_num * HWMUTEX_REG_SIZE);
++
++	do {
++		mmio_write_32(reg_addr, key);
++	} while (key != mmio_read_32(reg_addr));
++
++	/* Barrier: all critical-section memory ops happen after acquire */
++	dsbish();
++}
++
++/*
++ * hwmutex_release - release the hardware mutex (APPS_TZ side).
++ *
++ * Algorithm (from CPUCP hwmutex.c):
++ *   1. Issue DSB ISH to complete all critical-section memory accesses.
++ *   2. Write 0 to the mutex register to release ownership.
++ *   3. Read back to ensure the write reaches device memory.
++ */
++void hwmutex_release(hwmutex_t *mutex)
++{
++	uint32_t mutex_id  = mutex->mutex_id;
++	uint32_t mutex_num = (mutex_id >> HWMUTEX_NUM_SHIFT) & HWMUTEX_NUM_MASK;
++	uintptr_t reg_addr = APSS_CPUCP_S_MUTEX_BASE +
++			     (mutex_num * HWMUTEX_REG_SIZE);
++
++	/* Barrier: all critical-section memory ops happen before release */
++	dsbish();
++
++	mmio_write_32(reg_addr, 0U);
++
++	/* Read back to ensure write completion to device memory */
++	(void)mmio_read_32(reg_addr);
++}
+\ No newline at end of file
+diff --git a/drivers/qti/hwmutex/hwmutex.h b/drivers/qti/hwmutex/hwmutex.h
+new file mode 100644
+index 000000000..6c6733e1e
+--- /dev/null
++++ b/drivers/qti/hwmutex/hwmutex.h
+@@ -0,0 +1,126 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * Hardware Mutex (HWMUTEX) driver interface for TF-A.
++ *
++ * Implements the AP-side (APPS_TZ) view of the CPUCP hardware mutex block.
++ * The hardware mutex provides mutual exclusion between TF-A and the CPUCP
++ * co-processor firmware using a shared register bank.
++ *
++ * Protocol (ported from CPUCP hwmutex.c):
++ *   Acquire: write non-zero key, spin until readback matches, then DSB ISH.
++ *   Release: DSB ISH, write 0, readback for device-memory write completion.
++ *
++ * Key encoding (32-bit register value):
++ *   bits[31:24] = SUBSYSTEM_TYPE  (APPS_TZ = 0x2 for TF-A)
++ *   bits[23:8]  = MUTEX_ID        (hw_mutex_id enum value)
++ *   bits[7:0]   = CPU_NUM         (logical CPU number from plat_my_core_pos())
++ *
++ * Register address:
++ *   APSS_CPUCP_S_MUTEX_BASE + mutex_num * HWMUTEX_REG_SIZE
++ *   where mutex_num = mutex_id & 0xFF  (low byte of the mutex ID)
++ *
++ * Reference: CPUCP modules_v2/hwmutex/src/hwmutex.c
++ */
++
++#ifndef QTI_HWMUTEX_H
++#define QTI_HWMUTEX_H
++
++#include <stdint.h>
++
++/* --------------------------------------------------------------------------
++ * Subsystem type identifiers (CPUCP hwmutex.h SUBSYSTEM_TYPE values).
++ * TF-A runs as APPS_TZ.
++ * -------------------------------------------------------------------------- */
++#define HWMUTEX_SUBSYS_CPUCP		0x1U
++#define HWMUTEX_SUBSYS_APPS_TZ		0x2U	/* TF-A subsystem type */
++#define HWMUTEX_SUBSYS_APPS_PDP		0x3U
++#define HWMUTEX_SUBSYS_APPS_NS_HYP	0x4U
++#define HWMUTEX_SUBSYS_APPS_NS_HLOS	0x5U
++
++/* --------------------------------------------------------------------------
++ * Bit-field shifts and masks (from CPUCP hwmutex.h).
++ * -------------------------------------------------------------------------- */
++#define HWMUTEX_SUBSYS_SHIFT		24U
++#define HWMUTEX_SUBSYS_MASK		0xFFU
++#define HWMUTEX_ID_SHIFT		8U
++#define HWMUTEX_ID_MASK			0xFFFFU
++#define HWMUTEX_CPU_SHIFT		0U
++#define HWMUTEX_CPU_MASK		0xFFU
++
++/* Region and number fields within the mutex_id */
++#define HWMUTEX_REGION_ID_SHIFT		8U
++#define HWMUTEX_REGION_ID_MASK		0xFFU
++#define HWMUTEX_NUM_SHIFT		0U
++#define HWMUTEX_NUM_MASK		0xFFU
++
++/* Size of one HW mutex register in bytes */
++#define HWMUTEX_REG_SIZE		4U
++
++/* --------------------------------------------------------------------------
++ * HW Mutex IDs (from CPUCP hwmutex.h enum hw_mutex_id).
++ *
++ * ID encoding:
++ *   bits[15:8] = Region ID  (0 = secure bank, 1 = non-secure bank,
++ *                             2 = multidie secure, 3 = multidie non-secure)
++ *   bits[7:0]  = Mutex number within the bank
++ * -------------------------------------------------------------------------- */
++
++/* Secure bank (region 0) */
++#define HW_MUTEX_S_CPUCP		0x0000U
++#define HW_MUTEX_S_ATOMICS		0x0001U
++#define HW_MUTEX_S_TZ_SYSINI		0x0002U
++#define HW_MUTEX_S_PDP			0x0003U
++#define HW_MUTEX_S_LPM			0x0004U	/* NCC LPM vote-counter mutex */
++
++/* Non-secure bank (region 1) */
++#define HW_MUTEX_NS_ATOMICS		0x0100U
++#define HW_MUTEX_NS_HYP			0x0101U
++#define HW_MUTEX_NS_HLOS		0x0102U
++
++/* --------------------------------------------------------------------------
++ * Hardware mutex handle.
++ *
++ * @mutex_id  One of the HW_MUTEX_* IDs above.  Encodes both the register
++ *            bank (region) and the mutex number within that bank.
++ * -------------------------------------------------------------------------- */
++typedef struct {
++	uint32_t mutex_id;
++} hwmutex_t;
++
++/*
++ * hwmutex_init - initialise a hardware mutex handle.
++ *
++ * Must be called once before hwmutex_acquire() / hwmutex_release().
++ *
++ * @mutex     Pointer to the hwmutex_t to initialise.
++ * @mutex_id  One of the HW_MUTEX_* IDs above (e.g. HW_MUTEX_S_LPM).
++ */
++void hwmutex_init(hwmutex_t *mutex, uint32_t mutex_id);
++
++/*
++ * hwmutex_acquire - acquire the hardware mutex.
++ *
++ * Writes the APPS_TZ key to the HW mutex register and spins until the
++ * readback matches (i.e. the hardware has granted ownership to this
++ * subsystem).  Issues DSB ISH after the grant to order subsequent memory
++ * accesses within the critical section.
++ *
++ * @mutex  Pointer to an initialised hwmutex_t.
++ */
++void hwmutex_acquire(hwmutex_t *mutex);
++
++/*
++ * hwmutex_release - release the hardware mutex.
++ *
++ * Issues DSB ISH to complete all critical-section memory accesses, then
++ * writes 0 to the HW mutex register to release ownership.  Reads back the
++ * register to ensure the write reaches device memory before returning.
++ *
++ * @mutex  Pointer to an initialised hwmutex_t.
++ */
++void hwmutex_release(hwmutex_t *mutex);
++
++#endif /* QTI_HWMUTEX_H */
+\ No newline at end of file
+diff --git a/drivers/qti/hwmutex/hwmutex.mk b/drivers/qti/hwmutex/hwmutex.mk
+new file mode 100644
+index 000000000..e789cee33
+--- /dev/null
++++ b/drivers/qti/hwmutex/hwmutex.mk
+@@ -0,0 +1,27 @@
++#
++# Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++#
++# SPDX-License-Identifier: BSD-3-Clause
++#
++# Hardware Mutex (HWMUTEX) driver for TF-A.
++#
++# Provides:
++#   hwmutex.c   - low-level HW mutex acquire/release (mmio-based)
++#   hwm_lock.c  - ticket-lock and LPM-sync lock built on top of hwmutex
++#
++# Consumers must also set:
++#   PLAT_INCLUDES += -Iinclude/drivers/qti/cpucp/<chipset>
++# so that <cpucp_hwio.h> (which defines APSS_CPUCP_S_MUTEX_BASE and
++# CPU_LPM_SYNC_DATA_BASE) can be found.  This is typically done in the
++# chipset-specific platform.mk before including this file.
++#
++
++HWMUTEX_SOURCES	:=	drivers/qti/hwmutex/hwmutex.c		\
++			drivers/qti/hwmutex/hwm_lock.c
++
++# Expose the public hwmutex header to all TF-A components.
++HWMUTEX_INCLUDES :=	-Iinclude/drivers/qti/hwmutex		\
++			-Idrivers/qti/hwmutex
++
++BL31_SOURCES	+=	${HWMUTEX_SOURCES}
++PLAT_INCLUDES	+=	${HWMUTEX_INCLUDES}
+diff --git a/include/drivers/qti/cpucp/nord/cpucp_hwio.h b/include/drivers/qti/cpucp/nord/cpucp_hwio.h
+index b79bfe30d..8a3c1a60d 100644
+--- a/include/drivers/qti/cpucp/nord/cpucp_hwio.h
++++ b/include/drivers/qti/cpucp/nord/cpucp_hwio.h
+@@ -30,6 +30,8 @@
+ #define APSEC_CPUCP_SCMI_IPC_BASE		(CPUCP_DTIM0_BASE_AP + 0x3000U)
+ #define APSEC_CPUCP_SCMI_IPC_SIZE		(0x400U)
+ 
++#define APSS_CPUCP_S_MUTEX_BASE 		(0x18860000U)
++
+ /* Aliases kept for any existing callers. */
+ #define CPUCP_IPC_SEC_BUF_BASE			APSEC_CPUCP_SCMI_IPC_BASE
+ #define CPUCP_SECIPC_RAM_LENGTH			APSEC_CPUCP_SCMI_IPC_SIZE
+@@ -49,4 +51,4 @@
+ #define APSS_SHARED_TZ_IPC_INTERRUPT_OSM_IPC_SHFT	(28U)
+ #define APSS_SHARED_TZ_IPC_INTERRUPT_BIT		(1U << APSS_SHARED_TZ_IPC_INTERRUPT_OSM_IPC_SHFT)
+ 
+-#endif /* QTI_CPUCP_HWIO_H */
+\ No newline at end of file
++#endif /* QTI_CPUCP_HWIO_H */
+diff --git a/include/drivers/qti/hwmutex/hwm_lock.h b/include/drivers/qti/hwmutex/hwm_lock.h
+new file mode 100644
+index 000000000..f7399d65b
+--- /dev/null
++++ b/include/drivers/qti/hwmutex/hwm_lock.h
+@@ -0,0 +1,57 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * Public API for the ticket-lock and LPM-sync lock built on top of the
++ * TF-A hwmutex driver (hwm_lock.c).
++ */
++
++#ifndef HWM_LOCK_H
++#define HWM_LOCK_H
++
++#include <stdint.h>
++
++/*
++ * hwm_lock - acquire the ticket lock.
++ *
++ * Uses the HW mutex to atomically read-and-increment next_ticket, then spins
++ * until current_ticket reaches our ticket number.  Issues DSB ISH after the
++ * spin to order subsequent critical-section memory accesses.
++ *
++ * @lock: pointer to a ticket_lock object (opaque to callers)
++ */
++void hwm_lock(void *lock);
++
++/*
++ * hwm_unlock - release the ticket lock.
++ *
++ * Issues DSB ISH to complete all critical-section memory accesses, then
++ * advances current_ticket to wake the next waiter.
++ *
++ * @lock: pointer to a ticket_lock object (opaque to callers)
++ */
++void hwm_unlock(void *lock);
++
++/*
++ * acquire_lpm_lock - acquire the per-core LPM synchronisation lock.
++ *
++ * Spins under the HW mutex until the core's LPM status slot is free
++ * (CORE_NOT_IN_LPM), then marks it as CORE_IN_LPM and returns.
++ * Backs off with a short delay between retries to reduce bus contention.
++ *
++ * @core_id: zero-based index of the CPU core
++ */
++void acquire_lpm_lock(uint8_t core_id);
++
++/*
++ * release_lpm_lock - release the per-core LPM synchronisation lock.
++ *
++ * Clears the core's LPM status slot back to CORE_NOT_IN_LPM under the
++ * HW mutex so that other cores see a consistent update.
++ *
++ * @core_id: zero-based index of the CPU core
++ */
++void release_lpm_lock(uint8_t core_id);
++
++#endif /* HWM_LOCK_H */
+diff --git a/include/drivers/qti/hwmutex/hwmutex.h b/include/drivers/qti/hwmutex/hwmutex.h
+new file mode 100644
+index 000000000..6c6733e1e
+--- /dev/null
++++ b/include/drivers/qti/hwmutex/hwmutex.h
+@@ -0,0 +1,126 @@
++/*
++ * Copyright (c) 2026, Qualcomm Technologies, Inc. and/or its subsidiaries.
++ *
++ * SPDX-License-Identifier: BSD-3-Clause
++ *
++ * Hardware Mutex (HWMUTEX) driver interface for TF-A.
++ *
++ * Implements the AP-side (APPS_TZ) view of the CPUCP hardware mutex block.
++ * The hardware mutex provides mutual exclusion between TF-A and the CPUCP
++ * co-processor firmware using a shared register bank.
++ *
++ * Protocol (ported from CPUCP hwmutex.c):
++ *   Acquire: write non-zero key, spin until readback matches, then DSB ISH.
++ *   Release: DSB ISH, write 0, readback for device-memory write completion.
++ *
++ * Key encoding (32-bit register value):
++ *   bits[31:24] = SUBSYSTEM_TYPE  (APPS_TZ = 0x2 for TF-A)
++ *   bits[23:8]  = MUTEX_ID        (hw_mutex_id enum value)
++ *   bits[7:0]   = CPU_NUM         (logical CPU number from plat_my_core_pos())
++ *
++ * Register address:
++ *   APSS_CPUCP_S_MUTEX_BASE + mutex_num * HWMUTEX_REG_SIZE
++ *   where mutex_num = mutex_id & 0xFF  (low byte of the mutex ID)
++ *
++ * Reference: CPUCP modules_v2/hwmutex/src/hwmutex.c
++ */
++
++#ifndef QTI_HWMUTEX_H
++#define QTI_HWMUTEX_H
++
++#include <stdint.h>
++
++/* --------------------------------------------------------------------------
++ * Subsystem type identifiers (CPUCP hwmutex.h SUBSYSTEM_TYPE values).
++ * TF-A runs as APPS_TZ.
++ * -------------------------------------------------------------------------- */
++#define HWMUTEX_SUBSYS_CPUCP		0x1U
++#define HWMUTEX_SUBSYS_APPS_TZ		0x2U	/* TF-A subsystem type */
++#define HWMUTEX_SUBSYS_APPS_PDP		0x3U
++#define HWMUTEX_SUBSYS_APPS_NS_HYP	0x4U
++#define HWMUTEX_SUBSYS_APPS_NS_HLOS	0x5U
++
++/* --------------------------------------------------------------------------
++ * Bit-field shifts and masks (from CPUCP hwmutex.h).
++ * -------------------------------------------------------------------------- */
++#define HWMUTEX_SUBSYS_SHIFT		24U
++#define HWMUTEX_SUBSYS_MASK		0xFFU
++#define HWMUTEX_ID_SHIFT		8U
++#define HWMUTEX_ID_MASK			0xFFFFU
++#define HWMUTEX_CPU_SHIFT		0U
++#define HWMUTEX_CPU_MASK		0xFFU
++
++/* Region and number fields within the mutex_id */
++#define HWMUTEX_REGION_ID_SHIFT		8U
++#define HWMUTEX_REGION_ID_MASK		0xFFU
++#define HWMUTEX_NUM_SHIFT		0U
++#define HWMUTEX_NUM_MASK		0xFFU
++
++/* Size of one HW mutex register in bytes */
++#define HWMUTEX_REG_SIZE		4U
++
++/* --------------------------------------------------------------------------
++ * HW Mutex IDs (from CPUCP hwmutex.h enum hw_mutex_id).
++ *
++ * ID encoding:
++ *   bits[15:8] = Region ID  (0 = secure bank, 1 = non-secure bank,
++ *                             2 = multidie secure, 3 = multidie non-secure)
++ *   bits[7:0]  = Mutex number within the bank
++ * -------------------------------------------------------------------------- */
++
++/* Secure bank (region 0) */
++#define HW_MUTEX_S_CPUCP		0x0000U
++#define HW_MUTEX_S_ATOMICS		0x0001U
++#define HW_MUTEX_S_TZ_SYSINI		0x0002U
++#define HW_MUTEX_S_PDP			0x0003U
++#define HW_MUTEX_S_LPM			0x0004U	/* NCC LPM vote-counter mutex */
++
++/* Non-secure bank (region 1) */
++#define HW_MUTEX_NS_ATOMICS		0x0100U
++#define HW_MUTEX_NS_HYP			0x0101U
++#define HW_MUTEX_NS_HLOS		0x0102U
++
++/* --------------------------------------------------------------------------
++ * Hardware mutex handle.
++ *
++ * @mutex_id  One of the HW_MUTEX_* IDs above.  Encodes both the register
++ *            bank (region) and the mutex number within that bank.
++ * -------------------------------------------------------------------------- */
++typedef struct {
++	uint32_t mutex_id;
++} hwmutex_t;
++
++/*
++ * hwmutex_init - initialise a hardware mutex handle.
++ *
++ * Must be called once before hwmutex_acquire() / hwmutex_release().
++ *
++ * @mutex     Pointer to the hwmutex_t to initialise.
++ * @mutex_id  One of the HW_MUTEX_* IDs above (e.g. HW_MUTEX_S_LPM).
++ */
++void hwmutex_init(hwmutex_t *mutex, uint32_t mutex_id);
++
++/*
++ * hwmutex_acquire - acquire the hardware mutex.
++ *
++ * Writes the APPS_TZ key to the HW mutex register and spins until the
++ * readback matches (i.e. the hardware has granted ownership to this
++ * subsystem).  Issues DSB ISH after the grant to order subsequent memory
++ * accesses within the critical section.
++ *
++ * @mutex  Pointer to an initialised hwmutex_t.
++ */
++void hwmutex_acquire(hwmutex_t *mutex);
++
++/*
++ * hwmutex_release - release the hardware mutex.
++ *
++ * Issues DSB ISH to complete all critical-section memory accesses, then
++ * writes 0 to the HW mutex register to release ownership.  Reads back the
++ * register to ensure the write reaches device memory before returning.
++ *
++ * @mutex  Pointer to an initialised hwmutex_t.
++ */
++void hwmutex_release(hwmutex_t *mutex);
++
++#endif /* QTI_HWMUTEX_H */
+\ No newline at end of file
+diff --git a/plat/qti/cpu/ncc/src/qcom_ncc_psci.c b/plat/qti/cpu/ncc/src/qcom_ncc_psci.c
+index 146f32847..b4d39e277 100644
+--- a/plat/qti/cpu/ncc/src/qcom_ncc_psci.c
++++ b/plat/qti/cpu/ncc/src/qcom_ncc_psci.c
+@@ -37,6 +37,7 @@
+ #include <qti_plat.h>
+ 
+ #include <drivers/arm/gicv3.h>
++#include <hwm_lock.h>
+ #include <lib/spinlock.h>
+ #include <ncc_cpu_power.h>
+ #include <ncc_hwio.h>
+diff --git a/plat/qti/wildcat/nord/inc/cpucp_shared.h b/plat/qti/wildcat/nord/inc/cpucp_shared.h
+new file mode 100755
+index 000000000..8bd1447b1
+--- /dev/null
++++ b/plat/qti/wildcat/nord/inc/cpucp_shared.h
+@@ -0,0 +1,28 @@
++/*===========================================================================
++ *
++ * Copyright (c) QUALCOMM Technologies Incorporated.
++ * All Rights Reserved.
++ * QUALCOMM Proprietary and Confidential.
++ *
++ * $Header: cpucp_shared.h
++ *
++ *==========================================================================*/
++
++#ifndef __CPUCP_SHARED_H__
++#define __CPUCP_SHARED_H__
++
++#include "cpucp_hwio.h"
++
++enum core_lpm_status {
++        CORE_NOT_IN_LPM,
++        CORE_IN_LPM = 255
++};
++
++
++
++#define CPUCP_IPC_SEC_BUF_BASE		APSEC_CPUCP_SCMI_IPC_BASE
++#define CPUCP_IPC_SEC_BUF_SIZE		APSEC_CPUCP_SCMI_IPC_SIZE
++
++#define CPU_LPM_SYNC_DATA_BASE		(CPUCP_IPC_SEC_BUF_BASE + CPUCP_IPC_SEC_BUF_SIZE)
++
++#endif /* __CPUCP_SHARED_H__ */
+diff --git a/plat/qti/wildcat/nord/platform.mk b/plat/qti/wildcat/nord/platform.mk
+index 27703f3b8..4e61e83c0 100644
+--- a/plat/qti/wildcat/nord/platform.mk
++++ b/plat/qti/wildcat/nord/platform.mk
+@@ -162,6 +162,8 @@ include lib/xlat_tables_v2/xlat_tables.mk
+ include drivers/qti/smem/smem.mk
+ include drivers/qti/chipinfo/chipinfo.mk
+ include drivers/qti/qgic/qgic.mk
++include drivers/qti/hwmutex/hwmutex.mk
++
+ PLAT_BL_COMMON_SOURCES	+=	${XLAT_TABLES_LIB_SRCS}					\
+ 				plat/common/aarch64/crash_console_helpers.S    \
+ 				common/desc_image_load.c			\
+-- 
+2.43.0
+
