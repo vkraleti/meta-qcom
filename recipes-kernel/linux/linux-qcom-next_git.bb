@@ -35,6 +35,7 @@ SRC_URI += " \
     file://0001-FIXUP-ASoC-qcom-sc8280xp-fix-audio-capture-issue.patch \
     file://0002-FIXUP-arm64-dts-qcom-nord-ride-embedded-Fix-Audio-ca.patch \
     file://0003-FROMLIST-arm64-dts-qcom-nord-embedded-Raise-i2c18-pa.patch \
+    file://0004-FIXUP-arm64-dts-qcom-nord-rdd-Update-pcie-phy-regula.patch \
 "
 
 # To build tip of qcom-next branch set preferred

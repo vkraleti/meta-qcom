@@ -1,0 +1,32 @@
+From 9109e6606830885e81081d6977cf48c79b6e969d Mon Sep 17 00:00:00 2001
+From: Hariharan Sreedhar <hsreedha@qti.qualcomm.com>
+Date: Thu, 29 Oct 2026 11:56:12 +0530
+Subject: [PATCH] FIXUP: arm64: dts: qcom: nord-rdd: Update pcie phy regulator
+
+Update PCIe phy pll regulator supply
+---
+ arch/arm64/boot/dts/qcom/nord-rrd.dts | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+Upstream-Status: Pending
+
+diff --git a/arch/arm64/boot/dts/qcom/nord-rrd.dts b/arch/arm64/boot/dts/qcom/nord-rrd.dts
+index 8e7f77e103a4..69cab90741ba 100644
+--- a/arch/arm64/boot/dts/qcom/nord-rrd.dts
++++ b/arch/arm64/boot/dts/qcom/nord-rrd.dts
+@@ -765,9 +765,9 @@ &pcie_phy {
+ 	vdda-phy-c-supply = <&vreg_l4a_1p2>;
+ 	vdda-phy-d-supply = <&vreg_l4a_1p2>;
+ 	vdda-pll-a-supply = <&vreg_l1e_0p9>;
+-	vdda-pll-b-supply = <&vreg_l1e_0p9>;
+-	vdda-pll-c-supply = <&vreg_l1e_0p9>;
+-	vdda-pll-d-supply = <&vreg_l1e_0p9>;
++	vdda-pll-b-supply = <&vreg_l2e_0p9>;
++	vdda-pll-c-supply = <&vreg_l2e_0p9>;
++	vdda-pll-d-supply = <&vreg_l2e_0p9>;
+ 
+ 	status = "okay";
+ };
+-- 
+2.34.1
+
