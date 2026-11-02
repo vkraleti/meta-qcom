@@ -9,8 +9,16 @@ SRC_URI = " \
     https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES}_${PV}.zip;name=bootbinaries \
     https://${FW_ARTIFACTORY}/${PV}/${BOOTBINARIES_IMMUTABLE}_${PV}.zip;name=bootbinaries-immutable \
     https://${FW_ARTIFACTORY}/${PV}/LICENSE.txt;downloadfilename=LICENSE.${BPN};name=license \
+    file://tz_ac_config.bin \
     "
 SRC_URI[license.sha256sum] = "8401a2253b19272c59537567194d0b264e7ef466379334ff6cea0beec7b8165d"
+
+# Use the local tz_ac_config.bin instead of the one shipped in the
+# immutable boot binaries archive.
+do_unpack[postfuncs] += "nord_replace_tz_ac_config"
+nord_replace_tz_ac_config() {
+    install -m 0644 ${UNPACKDIR}/tz_ac_config.bin ${UNPACKDIR}/${BOOTBINARIES_IMMUTABLE}/tz_ac_config.bin
+}
 
 QCOM_BOOT_IMG_SUBDIR = "nord"
 QCOM_BOOT_SAIL_SUBDIR = "spinor"
