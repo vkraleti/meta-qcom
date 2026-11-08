@@ -6,3 +6,4 @@ SRC_URI = "git://github.com/qualcomm-linux/qcom-ptool.git;branch=main;protocol=h
 SRCREV = "ca37e384a5aab030fd1675affe957dc894e1e368"
 
 SRC_URI += "file://0001-platforms-nord-rrd-replace-ddr_a-ddr_b-with-DDR-tuni.patch"
+SRC_URI += "file://0002-platforms-nord-rrd-flash-the-open-boot-firmware-imag.patch"
