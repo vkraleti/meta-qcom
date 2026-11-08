@@ -9,6 +9,10 @@ QCOM_UBOOT_SPL_FIT_TEE ?= ""
 QCOM_UBOOT_SPL_FIT_XBL_SEC ?= ""
 QCOM_UBOOT_SPL_FIT_EXTRA_LOADABLES ?= ""
 
+# SPL image, relative to the build directory, that is signed into
+# u-boot-spl.mbn when no SWIV segment is added.
+QCOM_UBOOT_SPL_SIGN_ELF ?= "spl/u-boot-spl.elf"
+
 # "filename:size" entries for extra loadables that must fit the slot the SPL
 # reserves for them. A larger file is trimmed back to the slot size when the
 # excess bytes are only zero padding, and fails the build otherwise.
@@ -149,7 +153,7 @@ uboot_assemble_fitimage_helper:append() {
             qtestsign -${mbn_header} tz -o u-boot-spl.mbn u-boot-spl-swiv.elf
             rm -f u-boot-spl-swiv.elf
         else
-            qtestsign -${mbn_header} ${QCOM_SPL_FW_TYPE} -o u-boot-spl.mbn spl/u-boot-spl.elf
+            qtestsign -${mbn_header} ${QCOM_SPL_FW_TYPE} -o u-boot-spl.mbn ${QCOM_UBOOT_SPL_SIGN_ELF}
         fi
     fi
 }
