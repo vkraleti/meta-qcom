@@ -27,3 +27,25 @@ UBOOT_FIT_UBOOT_ENTRYPOINT ?= "0xD8D00000"
 # Recipes providing BL31 and OP-TEE for the FIT.
 QCOM_UBOOT_SPL_FIT_ATF ?= "trusted-firmware-a-qcom-nord"
 QCOM_UBOOT_SPL_FIT_TEE ?= "optee-os-qcom-nord"
+
+# The TZ access control config, deployed by firmware-qcom-boot-nord, is loaded
+# by the SPL along with BL31, OP-TEE and U-Boot.
+QCOM_UBOOT_SPL_FIT_EXTRA_LOADABLES ?= "firmware-qcom-boot-nord:tz_ac_config.bin"
+
+UBOOT_FIT_TZ_AC_CONFIG_LOADADDRESS ?= "0xBC000000"
+UBOOT_FIT_TZ_AC_CONFIG_ENTRYPOINT ?= "0xBC000000"
+
+UBOOT_FIT_USER_SETTINGS ?= "\
+        tz_ac_config {\n\
+            description = \"TZ Access Control Config\";\n\
+            data = /incbin/(\"tz_ac_config.bin\");\n\
+            type = \"firmware\";\n\
+            arch = \"${UBOOT_ARCH}\";\n\
+            load = <${UBOOT_FIT_TZ_AC_CONFIG_LOADADDRESS}>;\n\
+            entry = <${UBOOT_FIT_TZ_AC_CONFIG_ENTRYPOINT}>;\n\
+            compression = \"none\";\n\
+${QCOM_UBOOT_SPL_FIT_IMAGE_SIGN}\
+        };\n\
+"
+
+UBOOT_FIT_CONF_USER_LOADABLES ?= ", \"tz_ac_config\""
